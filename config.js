@@ -101,6 +101,8 @@ module.exports = {
     "islam", "muslim", "kristen", "katolik", "protestan", "hindu",
     "buddha", "yahudi", "gay", "homo", "lesbian", "lesbi", "biseksual", "bisexual",
     "transgender", "lgbt", "lgbtq", "lgbtqia", "queer", "nonbiner", "waria", "banci", "bencong",
+    "cino", "aseng", "kadrun", "cebong", "kafir", "murtad", "onta", "ontah",
+    "bancet", "wandu", "wanduk", "shemale", "pedofil", "pedo", "sodomi"
   ],
   MODERATION_INSULT_KEYWORDS: [
     "bodoh", "tolol", "goblok", "goblog", "bego", "dungu", "dongo",
@@ -109,6 +111,9 @@ module.exports = {
     "jijik", "menjijikkan", "tidak normal",
     "tak normal", "tidak pantas", "tidak layak", "abnormal",
     "penyakit", "kelainan", "menyimpang", "tidak bermoral", "menjijikan",
+    "pantek", "kimak", "peler", "jancok", "jancuk", "cok", "itil", "jembut", "pepek", 
+    "pantat", "setan", "iblis", "dajjal", "lacur", "perek", "lonte", "banci", "bencong",
+    "anj", "anjingg", "anjir", "anjrit", "bgst", "bjgn", "kntl", "mmk", "goblx", "goblog", "tolool", "bego",
   ],
   MODERATION_ATTACK_KEYWORDS: [
     "harus diusir", "harus dibunuh", "tidak pantas hidup", "tidak layak hidup",
@@ -119,6 +124,8 @@ module.exports = {
     "pelesetan", "plesetan", "dipelesetkan", "bahan lelucon",
     "bahan tertawaan", "bahan lawakan", "olok olok", "olok-olok",
     "mengejek", "diejek", "ngeledek", "wkwk", "hahaha",
+    "sok tau", "sok iye", "sok ganteng", "sok cantik", "sok pintar",
+    "caper", "pansos", "lebay", "norak", "kampungan", "udeso", "halu",
   ],
   MODERATION_DIRECT_IDENTITY_SLURS: ["banci", "bencong"],
   MODERATION_BLOCKED_PHRASES: ["dasar bodoh", "dasar tolol"],
