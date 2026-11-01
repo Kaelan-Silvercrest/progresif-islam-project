@@ -1,5 +1,5 @@
 /**
- * BOT VERIFIKASI ANGGOTA - RONAN COLLAWAY (multi-grup, universal)
+ * BOT VERIFIKASI ANGGOTA - RONAN CALLOWAY (multi-grup, universal)
  * -------------------------------------------------------------------
  * Fitur inti:
  *   1. Owner (OWNER_NUMBER di config.js) mendaftarkan grup lewat .addgroup
@@ -694,8 +694,8 @@ async function searchJournalArticles(
   endpoint.searchParams.set("select", "DOI,title,URL,type,container-title");
 
   const userAgent = cfg.CROSSREF_CONTACT_EMAIL
-    ? `Ronan-Collaway-Bot/1.0.0 (mailto:${cfg.CROSSREF_CONTACT_EMAIL})`
-    : "Ronan-Collaway-Bot/1.0.0";
+    ? `Ronan-Calloway-Bot/1.0.0 (mailto:${cfg.CROSSREF_CONTACT_EMAIL})`
+    : "Ronan-Calloway-Bot/1.0.0";
   const response = await fetchImpl(endpoint, {
     headers: { Accept: "application/json", "User-Agent": userAgent },
     signal: AbortSignal.timeout(cfg.JOURNAL_SEARCH_TIMEOUT_MS),

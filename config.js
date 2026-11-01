@@ -1,5 +1,5 @@
 /**
- * KONFIGURASI BOT VERIFIKASI UNIVERSAL - RONAN COLLAWAY BOT
+ * KONFIGURASI BOT VERIFIKASI UNIVERSAL - RONAN CALLOWAY BOT
  * -------------------------------------------------------------
  * Cukup isi OWNER_NUMBER (sudah diisi). Sisanya opsional untuk diedit.
  */

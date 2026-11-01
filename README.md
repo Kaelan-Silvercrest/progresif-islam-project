@@ -1,4 +1,4 @@
-# Ronan Collaway Bot — Verifikasi Anggota Universal
+# Ronan Calloway Bot — Verifikasi Anggota Universal
 
 Bot WhatsApp untuk memverifikasi calon anggota yang meminta join ke grup(-grup)
 yang kamu daftarkan. Owner-only, pertanyaan dinamis, tanpa auto-approve.

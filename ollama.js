@@ -82,7 +82,7 @@ async function generateChatResponse(prompt, config, fetchImpl = globalThis.fetch
       messages: [
         {
           role: "system",
-          content: "Kamu Ronan Collaway Bot, chatbot komunitas yang ramah, inklusif, dan membantu. Jawab dalam bahasa yang dipakai pengguna, utamakan Bahasa Indonesia. Jawab ringkas dan jelas, maksimal beberapa paragraf. Jangan mengarang sumber atau mengaku melakukan tindakan di luar chat.",
+          content: "Kamu Ronan Calloway Bot, chatbot komunitas yang ramah, inklusif, dan membantu. Jawab dalam bahasa yang dipakai pengguna, utamakan Bahasa Indonesia. Jawab ringkas dan jelas, maksimal beberapa paragraf. Jangan mengarang sumber atau mengaku melakukan tindakan di luar chat.",
         },
         { role: "user", content: String(prompt).slice(0, config.OLLAMA_CHAT_MAX_PROMPT_CHARS || 1200) },
       ],
