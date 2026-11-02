@@ -103,11 +103,13 @@ sendiri melalui perangkat tertaut.
 
 ## Perintah Grup
 
-Perintah berikut tersedia pada grup terdaftar. `.menu` menampilkan daftar
-perintah publik dan perintah khusus pemilik.
+Perintah berikut tersedia pada grup terdaftar. Perintah `!about` juga dapat
+digunakan melalui pesan pribadi. `.menu` menampilkan daftar perintah publik dan
+perintah khusus pemilik.
 
 | Perintah | Keterangan |
 |---|---|
+| `!about` | Menampilkan informasi pemilik, lisensi, repositori, dan fungsi bot. |
 | `.tebakangka` lalu `.tebak <1-50>` | Memulai dan menjawab permainan tebak angka. |
 | `.tebakkata` lalu `.jawabkata <kata>` | Memulai dan menjawab permainan tebak kata. |
 | `.skor` | Menampilkan skor pengguna. |
@@ -207,6 +209,15 @@ Jalankan seluruh pengujian dengan perintah berikut:
 ```bash
 npm test
 ```
+
+## Lisensi dan Repositori
+
+Proyek ini dilisensikan berdasarkan GNU Affero General Public License versi 3
+atau versi yang lebih baru (AGPL-3.0-or-later).
+
+Hak cipta (C) 2026 Ronan Calloway / Kaelan Silvercrest.
+
+Repositori: <https://github.com/Kaelan-Silvercrest/progresif-islam-project>
 
 ## Pemecahan Masalah
 

@@ -1,3 +1,13 @@
+/*
+ * Progresif Islam Project - WhatsApp Verification & Moderation Bot
+ * Copyright (C) 2026 Ronan Calloway / Kaelan Silvercrest
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 /**
  * BOT VERIFIKASI ANGGOTA - RONAN CALLOWAY (multi-grup, universal)
  * -------------------------------------------------------------------
@@ -230,6 +240,11 @@ async function startBot() {
     const text = extractText(msg);
     if (!text) return;
 
+    if (text.trim().toLowerCase() === "!about") {
+      await sock.sendMessage(remoteJid, { text: ABOUT_TEXT });
+      return;
+    }
+
     if (text.trim().toLowerCase() === ".menu") {
       await sock.sendMessage(remoteJid, { text: MENU_TEXT });
       return;
@@ -389,6 +404,11 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
   if (!group) return;
 
   const command = text.toLowerCase();
+  if (command.trim() === "!about") {
+    await sock.sendMessage(groupJid, { text: ABOUT_TEXT });
+    return;
+  }
+
   if (command === ".menu") {
     await sock.sendMessage(groupJid, { text: MENU_TEXT });
     return;
@@ -1501,10 +1521,23 @@ async function rejectSession(sock, session) {
 // PERINTAH OWNER (.menu, .addgroup, .delgroup, .listgroup, .pending, .approve, .reject)
 // =========================================================================
 
+const ABOUT_TEXT =
+  "*Progresif Islam Project*\n" +
+  "*Pemilik:* Ronan Calloway\n" +
+  "*Hak cipta:* (C) 2026 Ronan Calloway / Kaelan Silvercrest\n" +
+  "*Lisensi:* GNU AGPL v3.0 atau versi yang lebih baru (AGPL-3.0-or-later)\n" +
+  "https://www.gnu.org/licenses/agpl-3.0.html\n" +
+  "*Repositori:* https://github.com/Kaelan-Silvercrest/progresif-islam-project\n\n" +
+  "*Fungsi:* Bot WhatsApp untuk verifikasi calon anggota grup, moderasi, " +
+  "serta fitur komunitas seperti permainan, jajak pendapat, dan pencarian jurnal.\n\n" +
+  "Program ini diberikan tanpa jaminan. Penyalinan dan distribusi tunduk pada lisensi di atas.";
+
 const MENU_TEXT =
   "🤖 *RONAN CALLOWAY BOT*\n" +
   "_Asisten grup untuk verifikasi anggota, permainan ringan, dan obrolan yang tetap nyaman._\n" +
   "━━━━━━━━━━━━━━━━━━\n\n" +
+  "ℹ️ *INFORMASI BOT*\n" +
+  "!about\n\n" +
   "🎮 *PERMAINAN & INTERAKSI — ANGGOTA (grup terdaftar)*\n" +
   ".tebakangka lalu .tebak <1-50>\n" +
   ".tebakkata lalu .jawabkata <kata>\n" +
