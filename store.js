@@ -29,6 +29,7 @@ function defaultData() {
   return {
     groups: {},
     sessions: {},
+    verificationStatuses: {},
     activeSessionByNumber: {},
     queueByNumber: {},
     seenRequests: {},
@@ -109,6 +110,21 @@ module.exports = {
   },
   getAllSessions() {
     return Object.values(data.sessions);
+  },
+  setVerificationStatus(number, groupJid, status, sessionId, groupName) {
+    if (!data.verificationStatuses[number]) data.verificationStatuses[number] = {};
+    data.verificationStatuses[number][groupJid] = {
+      groupJid,
+      groupName,
+      status,
+      sessionId,
+      updatedAt: Date.now(),
+    };
+    saveData();
+  },
+  getVerificationStatuses(number) {
+    return Object.values(data.verificationStatuses[number] || {})
+      .sort((a, b) => b.updatedAt - a.updatedAt);
   },
   listQueuedNumbers() {
     return Object.keys(data.queueByNumber);

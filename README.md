@@ -17,6 +17,8 @@ berjalan dengan Node.js. Bot tidak memerlukan Chromium atau Puppeteer.
 - Menyediakan permainan tebak angka dan tebak kata dengan pencatatan skor per grup.
 - Menyediakan jajak pendapat, pencarian metadata artikel jurnal, saran, laporan, dan moderasi otomatis.
 - Menyediakan moderasi berbasis aturan lokal serta moderasi AI melalui Ollama.
+- Menyediakan downloader audio MP3 publik melalui command `.mp3 <link YouTube>` dengan batas durasi, ukuran, dan cooldown.
+- Menyediakan broadcast owner ke semua grup terdaftar, pemeriksaan status verifikasi, pembuatan sticker dari gambar/GIF, dan terjemahan teks.
 
 ## Persyaratan
 
@@ -74,6 +76,8 @@ Jika nomor yang sama memiliki permintaan pada beberapa grup dalam waktu
 berdekatan, bot memproses sesi secara berurutan. Setelah anggota bergabung,
 bot dapat mengirim pesan sambutan dan menampilkan foto profil jika tersedia.
 Foto profil tidak disimpan oleh bot.
+Anggota dapat memakai `.verifstatus` melalui DM bot untuk melihat status
+verifikasi terakhir per grup.
 
 ## Perintah Pemilik
 
@@ -87,6 +91,7 @@ sendiri melalui perangkat tertaut.
 | `.addgroup <tautan>` | Mendaftarkan grup untuk dipantau. |
 | `.listgroup` | Menampilkan grup terdaftar beserta nomor urutnya. |
 | `.delgroup <nomor>` | Menghapus grup dari daftar pemantauan. |
+| `.broadcast <pesan>` | Mengirim pesan ke semua grup terdaftar secara berurutan. Gunakan melalui DM owner ke bot. |
 | `.pending` | Menampilkan sesi verifikasi yang menunggu keputusan. |
 | `.status` | Menampilkan status grup, sesi, antrean, dan pemantauan. |
 | `.pause` / `.resume` | Menghentikan atau melanjutkan pemeriksaan permintaan bergabung. Sesi yang berjalan tetap menerima jawaban. |
@@ -121,6 +126,9 @@ perintah khusus pemilik.
 | `.profil` | Menampilkan skor dan peringkat pengguna. |
 | `.jurnal <topik>` | Mencari metadata artikel jurnal melalui Crossref. |
 | `.ai <pertanyaan>` | Mengirim pertanyaan kepada chatbot lokal berbasis Ollama. |
+| `.mp3 <link YouTube>` | Mengunduh audio dari video YouTube dan mengirimkannya sebagai MP3. Dapat digunakan semua pengguna di DM atau grup terdaftar. |
+| `.sticker` | Mengubah gambar atau GIF menjadi sticker. Kirim gambar/GIF dengan caption `.sticker`, atau balas gambar/GIF dengan command ini. |
+| `.translate <kode-bahasa> <teks>` | Menerjemahkan teks, misalnya `.translate en Selamat pagi`. Tersedia di DM atau grup terdaftar. |
 | `.saran <isi>` | Mengirim saran secara pribadi kepada pemilik bot. |
 | `.lapor @anggota [alasan]` | Mengirim laporan secara pribadi kepada pemilik bot. |
 
@@ -133,6 +141,40 @@ atau mengunduh berkas. Kata kunci pencarian dikirim ke layanan Crossref.
 Saran dan laporan diteruskan melalui pesan pribadi kepada pemilik bot. Setiap
 anggota memiliki jeda 60 detik untuk masing-masing jenis perintah pada setiap
 grup.
+
+### Downloader MP3
+
+Perintah `.mp3 <link YouTube>` dapat digunakan oleh semua pengguna, baik melalui
+DM maupun di grup yang sudah terdaftar. Bot hanya menerima URL YouTube, tidak
+memproses playlist, membatasi durasi sesuai konfigurasi, dan mengirim audio
+berkualitas 128 kbps jika ukuran file masih sesuai batas WhatsApp. Proses
+membutuhkan `ffmpeg` yang disediakan oleh dependency `ffmpeg-static` serta
+`yt-dlp` melalui `yt-dlp-exec`. Gunakan fitur ini hanya untuk konten yang kamu
+miliki atau yang memang diizinkan untuk diunduh, dan tetap patuhi ketentuan
+YouTube serta hak cipta.
+
+Downloader menggunakan satu proses aktif pada satu waktu dan cooldown per
+pengguna/chat untuk mengurangi beban server. File sementara dihapus setelah
+pengiriman atau ketika proses gagal.
+
+### Sticker, Terjemahan, dan Status Verifikasi
+
+Perintah `.sticker` menerima gambar atau GIF hingga 10 MB. GIF dikonversi
+menjadi sticker animasi dengan durasi maksimal delapan detik; hasil sticker
+dibatasi hingga 1 MB. Untuk gambar yang sudah terkirim, balas gambar tersebut
+dengan `.sticker`.
+
+Perintah `.translate <kode-bahasa> <teks>` mendeteksi bahasa sumber secara
+otomatis dan meminta terjemahan ke layanan MyMemory. Teks yang diminta untuk
+diterjemahkan dikirim ke layanan tersebut; jangan gunakan untuk teks sensitif.
+Panjang teks dibatasi 1.000 karakter dan command memiliki cooldown 30 detik per
+pengguna/chat.
+
+Perintah `.verifstatus` hanya menampilkan status sesi verifikasi milik pengirim
+yang menggunakannya lewat DM bot, termasuk menunggu dimulai, sedang berlangsung,
+menunggu keputusan owner, diterima, ditolak, kedaluwarsa, atau dibatalkan.
+Riwayat menyimpan status dan nama grup terakhir per grup, bukan jawaban
+verifikasi.
 
 ### Moderasi Grup
 
@@ -188,6 +230,12 @@ Pengaturan bot berada di `config.js`. Nilai yang umum disesuaikan meliputi:
 | `MODERATION_ADMIN_EXEMPT` | Mengecualikan administrator grup dari moderasi otomatis. Nilai bawaan `false`. |
 | `JOURNAL_SEARCH_ENABLED` | Mengaktifkan pencarian metadata jurnal. |
 | `CROSSREF_CONTACT_EMAIL` | Alamat email opsional untuk permintaan ke Crossref. |
+| `MP3_DOWNLOADER_ENABLED` | Mengaktifkan downloader MP3 publik. |
+| `MP3_COOLDOWN_MS` | Jeda penggunaan downloader per pengguna dan chat. |
+| `MP3_MAX_DURATION_SECONDS` | Durasi maksimum video yang boleh diproses. |
+| `MP3_MAX_FILE_SIZE_BYTES` | Ukuran maksimum file MP3 yang dikirim. |
+| `MP3_DOWNLOAD_TIMEOUT_MS` | Batas waktu proses metadata dan download. |
+| `MP3_OUTPUT_DIR` | Direktori sementara file MP3. |
 
 Pengaturan tambahan untuk pertanyaan verifikasi, batas permainan, jajak
 pendapat, pencocokan kata moderasi, dan templat pesan tersedia di `config.js`.
@@ -226,6 +274,13 @@ Repositori: <https://github.com/Kaelan-Silvercrest/progresif-islam-project>
 Pastikan persetujuan anggota aktif pada pengaturan grup dan akun bot merupakan
 administrator. Gunakan `.testgroup <nomor>` untuk memeriksa akses bot terhadap
 informasi grup dan daftar permintaan.
+
+**Downloader MP3 gagal**
+
+Pastikan dependency sudah terpasang dengan `npm install`, link yang diberikan
+merupakan URL video YouTube (bukan playlist), video tidak melebihi batas durasi,
+dan `yt-dlp` masih dapat mengakses video tersebut. Beberapa video dapat gagal
+karena pembatasan wilayah, login, atau perubahan layanan YouTube.
 
 **Ollama tidak tersedia**
 

@@ -44,11 +44,15 @@ const cfg = require("./config.js");
 const store = require("./store.js");
 const { matchModerationKeywords } = require("./moderation.js");
 const { classifyTargetedAbuse, generateChatResponse, getOllamaStatus } = require("./ollama.js");
+const { downloadYouTubeMp3, removeDownloadedFile } = require("./youtube.js");
+const { createSticker } = require("./sticker.js");
 
 const logger = pino({ level: "silent" }); // ganti ke "info" untuk debug baileys
 const botGeneratedMessageIds = new Set();
 let ollamaRequestInFlight = false;
 let lastOllamaFailureLogAt = 0;
+let mp3DownloadInFlight = false;
+let broadcastInFlight = false;
 
 const jidFromNumber = (num) => `${num}@s.whatsapp.net`;
 const numberFromJid = (jid) => jid.split("@")[0].split(":")[0];
@@ -121,7 +125,7 @@ function normalizeKeywordText(value) {
 function installMessageGuard(sock) {
   const sendMessage = sock.sendMessage.bind(sock);
   sock.sendMessage = async (jid, content, options) => {
-    const messageType = content.delete ? "delete" : content.image ? "image" : "text";
+    const messageType = content.delete ? "delete" : content.image ? "image" : content.sticker ? "sticker" : "text";
 
     if (cfg.DRY_RUN) {
       console.log(`[SIMULASI] Tidak mengirim ${messageType} ke ${jid}.`);
@@ -250,6 +254,26 @@ async function startBot() {
       return;
     }
 
+    if (/^\.mp3(?:\s|$)/i.test(text.trim())) {
+      await handleMp3Command(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
+      return;
+    }
+
+    if (/^\.sticker(?:\s|$)/i.test(text.trim())) {
+      await handleStickerCommand(sock, remoteJid, msg);
+      return;
+    }
+
+    if (/^\.translate(?:\s|$)/i.test(text.trim())) {
+      await handleTranslateCommand(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
+      return;
+    }
+
+    if (/^\.verifstatus(?:\s|$)/i.test(text.trim())) {
+      await handleVerificationStatus(sock, remoteJid, senderNumber);
+      return;
+    }
+
     if (/^\.ai(?:\s|$)/i.test(text.trim())) {
       await handleAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
       return;
@@ -313,7 +337,12 @@ async function startBot() {
 
 function extractText(msg) {
   const m = msg.message;
-  return m.conversation || m.extendedTextMessage?.text || null;
+  return m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
+    null;
 }
 
 function isConfiguredOwnerJid(...jids) {
@@ -349,6 +378,176 @@ async function getModerationReason(text, fetchImpl = globalThis.fetch) {
   } finally {
     ollamaRequestInFlight = false;
   }
+}
+
+async function handleMp3Command(sock, chatJid, senderJid, text) {
+  if (!cfg.MP3_DOWNLOADER_ENABLED) {
+    await sock.sendMessage(chatJid, { text: "Downloader MP3 sedang dinonaktifkan." });
+    return;
+  }
+
+  const input = text.replace(/^\.mp3\b/i, "").trim();
+  if (!input) {
+    await sock.sendMessage(chatJid, { text: "Format: .mp3 <link YouTube>" });
+    return;
+  }
+  if (!senderJid) return;
+
+  const number = numberFromJid(senderJid || chatJid);
+  const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, "mp3");
+  const cooldownLeft = cfg.MP3_COOLDOWN_MS - (Date.now() - lastUsed);
+  if (cooldownLeft > 0) {
+    await sock.sendMessage(chatJid, {
+      text: `Downloader MP3 bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
+    });
+    return;
+  }
+  if (mp3DownloadInFlight) {
+    await sock.sendMessage(chatJid, { text: "Masih ada proses download MP3 lain. Coba lagi sebentar." });
+    return;
+  }
+  if (cfg.DRY_RUN) {
+    console.log(`[SIMULASI] Command .mp3 dari ${number}; tidak mengunduh atau mengirim file.`);
+    return;
+  }
+
+  store.markGroupMemberCommandUsed(chatJid, number, "mp3", Date.now());
+  mp3DownloadInFlight = true;
+  let downloaded = null;
+  try {
+    await sock.sendMessage(chatJid, { text: "Sedang memproses audio. Mohon tunggu..." });
+    downloaded = await downloadYouTubeMp3(input, cfg);
+    await sock.sendMessage(chatJid, {
+      audio: { url: downloaded.filePath },
+      mimetype: "audio/mpeg",
+      fileName: `${downloaded.title}.mp3`,
+      ptt: false,
+    });
+  } catch (error) {
+    console.error(`[MP3] Gagal memproses permintaan dari ${number}:`, error?.message || error);
+    await sock.sendMessage(chatJid, {
+      text: `Download MP3 gagal: ${error?.message || "terjadi kesalahan"}. Pastikan link YouTube valid dan durasinya tidak melebihi batas.`,
+    });
+  } finally {
+    await removeDownloadedFile(downloaded?.filePath);
+    mp3DownloadInFlight = false;
+  }
+}
+
+async function handleStickerCommand(sock, chatJid, message) {
+  if (cfg.DRY_RUN) {
+    console.log(`[SIMULASI] Command .sticker di ${chatJid}; media tidak diunduh atau dikirim.`);
+    return;
+  }
+  try {
+    const sticker = await createSticker(message);
+    await sock.sendMessage(chatJid, { sticker });
+  } catch (error) {
+    console.error(`[STICKER] Gagal memproses media: ${error?.message || error}`);
+    await sock.sendMessage(chatJid, {
+      text: `Sticker gagal dibuat: ${error?.message || "terjadi kesalahan saat memproses media."}`,
+    });
+  }
+}
+
+async function handleTranslateCommand(sock, chatJid, senderJid, text) {
+  const match = text.match(/^\.translate\s+([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\s+([\s\S]+)$/i);
+  if (!match) {
+    await sock.sendMessage(chatJid, { text: "Format: .translate <kode-bahasa> <teks>\nContoh: .translate en Selamat pagi." });
+    return;
+  }
+  const [, targetLanguage, sourceText] = match;
+  if (sourceText.length > cfg.TRANSLATE_MAX_CHARS) {
+    await sock.sendMessage(chatJid, {
+      text: `Teks terlalu panjang. Batas terjemahan ${cfg.TRANSLATE_MAX_CHARS} karakter.`,
+    });
+    return;
+  }
+  if (!senderJid) {
+    await sock.sendMessage(chatJid, { text: "Nomor pengirim tidak dapat dikenali untuk command terjemahan ini." });
+    return;
+  }
+
+  const number = numberFromJid(senderJid);
+  const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, "translate");
+  const cooldownLeft = cfg.TRANSLATE_COOLDOWN_MS - (Date.now() - lastUsed);
+  if (cooldownLeft > 0) {
+    await sock.sendMessage(chatJid, {
+      text: `Terjemahan bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
+    });
+    return;
+  }
+  if (cfg.DRY_RUN) {
+    console.log(`[SIMULASI] Command .translate di ${chatJid}; teks tidak dikirim ke layanan terjemahan.`);
+    return;
+  }
+
+  store.markGroupMemberCommandUsed(chatJid, number, "translate", Date.now());
+  try {
+    const url = new URL(cfg.TRANSLATE_API_URL);
+    url.searchParams.set("q", sourceText);
+    url.searchParams.set("langpair", `autodetect|${targetLanguage}`);
+    const response = await fetch(url, { signal: AbortSignal.timeout(cfg.TRANSLATE_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`layanan terjemahan merespons HTTP ${response.status}`);
+    const data = await response.json();
+    const translatedText = data?.responseData?.translatedText;
+    if (data?.responseStatus >= 400 || typeof translatedText !== "string" || !translatedText.trim()) {
+      throw new Error(data?.responseDetails || "layanan tidak memberikan hasil terjemahan");
+    }
+    await sock.sendMessage(chatJid, {
+      text: `🌐 *Terjemahan (${targetLanguage.toLowerCase()}):*\n${translatedText}`,
+    });
+  } catch (error) {
+    console.error(`[TRANSLATE] Gagal menerjemahkan: ${error?.message || error}`);
+    await sock.sendMessage(chatJid, {
+      text: "Terjemahan gagal. Layanan mungkin sedang tidak tersedia; coba lagi nanti.",
+    });
+  }
+}
+
+const VERIFICATION_STATUS_LABELS = {
+  menunggu_mulai: "menunggu kamu memulai verifikasi",
+  sedang_verifikasi: "verifikasi sedang berlangsung",
+  menunggu_review: "jawaban diterima, menunggu keputusan owner",
+  diterima: "permintaan bergabung diterima",
+  ditolak: "permintaan bergabung ditolak",
+  kedaluwarsa: "sesi verifikasi kedaluwarsa",
+  dibatalkan: "sesi verifikasi dibatalkan oleh owner",
+};
+
+async function handleVerificationStatus(sock, chatJid, number) {
+  const latestByGroup = new Map(
+    store.getVerificationStatuses(number).map((item) => [item.groupJid, item])
+  );
+  for (const session of store.getAllSessions()) {
+    if (session.number !== number) continue;
+    const status = ["tanya_open", "tanya_kuis"].includes(session.status)
+      ? "sedang_verifikasi"
+      : session.status;
+    latestByGroup.set(session.groupJid, {
+      groupJid: session.groupJid,
+      groupName: session.groupName,
+      status,
+      sessionId: session.id,
+      updatedAt: session.updatedAt || session.createdAt,
+    });
+  }
+  const statuses = [...latestByGroup.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!statuses.length) {
+    await sock.sendMessage(chatJid, {
+      text: "Belum ada status verifikasi yang tercatat untuk nomor ini.",
+    });
+    return;
+  }
+
+  const lines = statuses.map((item) => {
+    const label = VERIFICATION_STATUS_LABELS[item.status] || "status tidak diketahui";
+    const updatedAt = new Date(item.updatedAt).toLocaleString("id-ID");
+    return `• *${item.groupName || item.groupJid}*: ${label} (ID #${item.sessionId})\n  Diperbarui: ${updatedAt}`;
+  });
+  await sock.sendMessage(chatJid, {
+    text: `📋 *Status verifikasi kamu:*\n${lines.join("\n")}`,
+  });
 }
 
 async function handleAiChat(sock, chatJid, senderJid, text) {
@@ -414,6 +613,11 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
     return;
   }
 
+  if (/^\.sticker(?:\s|$)/i.test(text.trim())) {
+    await handleStickerCommand(sock, groupJid, message);
+    return;
+  }
+
   if (/^\.(kuis|kuisstatus|kuisstop|diskusi|fakta)\b/i.test(text)) {
     await sock.sendMessage(groupJid, {
       text: "Fitur kuis, diskusi, dan fakta sedang dinonaktifkan sementara.",
@@ -435,8 +639,18 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
     return;
   }
 
+  if (/^\.mp3(?:\s|$)/i.test(text.trim())) {
+    await handleMp3Command(sock, groupJid, senderJid, text.trim());
+    return;
+  }
+
   if (/^\.ai(?:\s|$)/i.test(text.trim())) {
     await handleAiChat(sock, groupJid, senderJid, text.trim());
+    return;
+  }
+
+  if (/^\.translate(?:\s|$)/i.test(text.trim())) {
+    await handleTranslateCommand(sock, groupJid, senderJid, text.trim());
     return;
   }
 
@@ -449,7 +663,7 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
     ".tebakangka", ".tebakkata", ".tebak", ".jawabkata",
     ".skor", ".topskor", ".profil", ".poll", ".vote",
     ".hasilpoll", ".tutupoll",
-    ".jurnal",
+    ".jurnal", ".mp3",
   ];
   if (cfg.DRY_RUN && memberCommands.some((name) => command === name || command.startsWith(`${name} `))) {
     console.log(`[SIMULASI] Command grup="${group.name}": ${command.split(/\s+/)[0]}`);
@@ -1354,6 +1568,7 @@ async function startVerificationSession(sock, number, participantJid, groupJid, 
   };
   store.setSession(id, session);
   store.setActiveSessionId(number, id);
+  store.setVerificationStatus(number, groupJid, "menunggu_mulai", id, groupName);
   store.markVerificationSent(number, now);
 
   await sock.sendMessage(participantJid, { text: cfg.WELCOME_TEMPLATE(groupName) });
@@ -1371,6 +1586,13 @@ function cleanupExpiredSessions() {
     if (now - session.createdAt < cfg.SESSION_TIMEOUT_MS) continue;
 
     console.log(`⌛ [#${session.id}] Sesi ${session.number} kedaluwarsa, dibersihkan.`);
+    store.setVerificationStatus(
+      session.number,
+      session.groupJid,
+      "kedaluwarsa",
+      session.id,
+      session.groupName
+    );
     store.deleteSession(session.id);
     store.clearActiveSessionId(session.number);
     store.clearSeenRequest(`${session.groupJid}:${session.number}`);
@@ -1421,6 +1643,13 @@ async function handleUserMessage(sock, number, text) {
     session.status = "tanya_open";
     session.step = 0;
     store.setSession(session.id, session);
+    store.setVerificationStatus(
+      session.number,
+      session.groupJid,
+      "sedang_verifikasi",
+      session.id,
+      session.groupName
+    );
     await sock.sendMessage(recipientJid, { text: formatOpenQuestion(session) });
     return;
   }
@@ -1452,6 +1681,13 @@ async function finishVerification(sock, session) {
   delete session.skor;
   delete session.rekomendasi;
   store.setSession(session.id, session);
+  store.setVerificationStatus(
+    session.number,
+    session.groupJid,
+    "menunggu_review",
+    session.id,
+    session.groupName
+  );
   store.clearActiveSessionId(session.number);
 
   await sock.sendMessage(participantTargetJid(session), { text: cfg.MSG_SUBMITTED });
@@ -1484,6 +1720,13 @@ async function approveSession(sock, session) {
     await sock.sendMessage(participantTargetJid(session), {
       text: cfg.MSG_APPROVED_TEMPLATE(session.groupName),
     });
+    store.setVerificationStatus(
+      session.number,
+      session.groupJid,
+      "diterima",
+      session.id,
+      session.groupName
+    );
     store.deleteSession(session.id);
     store.clearSeenRequest(`${session.groupJid}:${session.number}`);
     console.log(`✅ [#${session.id}] ${session.number} disetujui masuk "${session.groupName}".`);
@@ -1507,6 +1750,13 @@ async function rejectSession(sock, session) {
     );
     ensureParticipantActionSucceeded(results, "reject");
     await sock.sendMessage(participantTargetJid(session), { text: cfg.MSG_REJECTED });
+    store.setVerificationStatus(
+      session.number,
+      session.groupJid,
+      "ditolak",
+      session.id,
+      session.groupName
+    );
     store.deleteSession(session.id);
     store.clearSeenRequest(`${session.groupJid}:${session.number}`);
     console.log(`❌ [#${session.id}] ${session.number} ditolak dari "${session.groupName}".`);
@@ -1544,10 +1794,14 @@ const MENU_TEXT =
   ".poll <pertanyaan> | opsi 1; opsi 2\n" +
   ".vote <nomor> / .hasilpoll\n" +
   ".tutupoll (pembuat/admin/owner)\n\n" +
-  "🧰 *UTILITAS & KOMUNITAS — ANGGOTA (grup terdaftar)*\n" +
+  "🧰 *UTILITAS & KOMUNITAS — ANGGOTA (DM/grup terdaftar)*\n" +
   ".skor / .topskor\n" +
   ".profil\n" +
   ".jurnal <topik>\n" +
+  ".mp3 <link YouTube>\n" +
+  ".sticker (kirim/balas gambar atau GIF)\n" +
+  ".translate <kode-bahasa> <teks>\n" +
+  ".verifstatus (DM bot)\n" +
   ".ai <pertanyaan>\n" +
   ".saran <isi saran>\n" +
   ".lapor @anggota [alasan]\n\n" +
@@ -1559,6 +1813,7 @@ const MENU_TEXT =
   ".addgroup <link-undangan>\n" +
   ".delgroup <nomor .listgroup>\n" +
   ".listgroup\n\n" +
+  ".broadcast <pesan>\n\n" +
   "🧰 *ALAT OWNER (lewat DM bot)*\n" +
   ".status\n" +
   ".ollama status|on|off|reset|test\n" +
@@ -1646,6 +1901,60 @@ async function handleOwnerCommand(sock, text) {
 
   if (cmd === ".menu") {
     await sock.sendMessage(ownerTargetJid(), { text: MENU_TEXT });
+    return true;
+  }
+
+  if (cmd === ".broadcast") {
+    if (!arg) {
+      await sock.sendMessage(ownerTargetJid(), { text: "Format: .broadcast <pesan>" });
+      return true;
+    }
+    if (arg.length > 3500) {
+      await sock.sendMessage(ownerTargetJid(), { text: "Pesan broadcast maksimal 3.500 karakter." });
+      return true;
+    }
+    if (broadcastInFlight) {
+      await sock.sendMessage(ownerTargetJid(), { text: "Broadcast lain sedang berjalan. Coba lagi setelah selesai." });
+      return true;
+    }
+
+    const groups = store.listGroups();
+    if (!groups.length) {
+      await sock.sendMessage(ownerTargetJid(), { text: "Belum ada grup terdaftar untuk menerima broadcast." });
+      return true;
+    }
+    if (cfg.DRY_RUN) {
+      console.log(`[SIMULASI] Broadcast diminta untuk ${groups.length} grup; pesan tidak dikirim.`);
+      await sock.sendMessage(ownerTargetJid(), {
+        text: `Mode simulasi aktif. Broadcast tidak dikirim ke ${groups.length} grup.`,
+      });
+      return true;
+    }
+
+    broadcastInFlight = true;
+    const failures = [];
+    let sent = 0;
+    try {
+      for (const [index, group] of groups.entries()) {
+        try {
+          await sock.sendMessage(group.jid, { text: arg });
+          sent += 1;
+        } catch (error) {
+          console.error(`[BROADCAST] Gagal mengirim ke "${group.name}" (${group.jid}): ${error?.message || error}`);
+          failures.push(group.name || group.jid);
+        }
+        if (index < groups.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+    } finally {
+      broadcastInFlight = false;
+    }
+
+    const failureList = failures.length ? `\nGagal: ${failures.join(", ")}` : "";
+    await sock.sendMessage(ownerTargetJid(), {
+      text: `Broadcast selesai. Berhasil: ${sent}/${groups.length} grup.${failureList}`,
+    });
     return true;
   }
 
@@ -1741,6 +2050,13 @@ async function handleOwnerCommand(sock, text) {
     if (store.getActiveSessionId(session.number) === session.id) {
       store.clearActiveSessionId(session.number);
     }
+    store.setVerificationStatus(
+      session.number,
+      session.groupJid,
+      "dibatalkan",
+      session.id,
+      session.groupName
+    );
     store.deleteSession(session.id);
     store.markRequestSeen(`${session.groupJid}:${session.number}`);
     const response = `Sesi #${session.id} dihapus dari bot. Permintaan join WhatsApp tidak otomatis disetujui atau ditolak.`;
@@ -1967,6 +2283,10 @@ module.exports = {
   handleGroupMessage,
   handleGroupModerationCommand,
   handleAiChat,
+  handleMp3Command,
+  handleStickerCommand,
+  handleTranslateCommand,
+  handleVerificationStatus,
   handleOllamaCommand,
   handleUserMessage,
   handleOwnerCommand,
