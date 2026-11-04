@@ -4,6 +4,19 @@ const CHAT_SYSTEM_PROMPT =
   "Jawab ringkas dan jelas, maksimal beberapa paragraf. Jangan mengarang sumber " +
   "atau mengaku melakukan tindakan di luar chat.";
 
+const SOSHUM_SYSTEM_PROMPT =
+  "Kamu adalah asisten akademik sosial-humaniora yang kritis, adil, dan mudah dipahami. " +
+  "Jawab terutama dalam Bahasa Indonesia. Bantu menjelaskan konsep, menganalisis " +
+  "argumen, membandingkan perspektif, dan menyusun jawaban ilmu sosial, sejarah, " +
+  "filsafat, budaya, politik, ekonomi, serta pendidikan. Berikan konteks dan bedakan " +
+  "fakta, interpretasi, dan opini. Hindari generalisasi dan sudut pandang tunggal " +
+  "untuk topik yang diperdebatkan. Jangan mengarang fakta, kutipan, atau sumber; " +
+  "jika tidak yakin, nyatakan keterbatasannya dan sarankan cara memverifikasi. " +
+  "Jawab terstruktur dan sesuai tingkat kedalaman pertanyaan. Untuk pertanyaan " +
+  "analisis atau esai, berikan jawaban lengkap dengan tesis, uraian faktor atau " +
+  "argumen utama, konteks/contoh yang relevan, dan kesimpulan. Jangan berhenti di " +
+  "tengah kalimat atau memangkas jawaban; utamakan jawaban tuntas dan cukup rinci.";
+
 const PROVIDERS = {
   groq: {
     keyField: "GROQ_API_KEY",
@@ -23,6 +36,16 @@ const PROVIDERS = {
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
     protocol: "openai",
   },
+  "openrouter-soshum": {
+    keyField: "OPENROUTER_API_KEY",
+    modelField: "OPENROUTER_SOSHUM_MODEL",
+    timeoutField: "OPENROUTER_SOSHUM_TIMEOUT_MS",
+    responseCharsField: "OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS",
+    outputTokensField: "OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS",
+    endpoint: "https://openrouter.ai/api/v1/chat/completions",
+    protocol: "openai",
+    systemPrompt: SOSHUM_SYSTEM_PROMPT,
+  },
   cerebras: {
     keyField: "CEREBRAS_API_KEY",
     modelField: "CEREBRAS_MODEL",
@@ -38,10 +61,10 @@ function providerConfig(provider, config) {
     ...definition,
     apiKey: config[definition.keyField],
     model: config[definition.modelField],
-    timeoutMs: config.AI_PROVIDER_TIMEOUT_MS,
+    timeoutMs: config[definition.timeoutField] || config.AI_PROVIDER_TIMEOUT_MS,
     maxPromptChars: config.OLLAMA_CHAT_MAX_PROMPT_CHARS,
-    maxResponseChars: config.OLLAMA_CHAT_MAX_RESPONSE_CHARS,
-    maxOutputTokens: config.AI_PROVIDER_MAX_OUTPUT_TOKENS,
+    maxResponseChars: config[definition.responseCharsField] || config.OLLAMA_CHAT_MAX_RESPONSE_CHARS,
+    maxOutputTokens: config[definition.outputTokensField] || config.AI_PROVIDER_MAX_OUTPUT_TOKENS,
   };
 }
 
@@ -117,7 +140,7 @@ async function generateProviderResponse(provider, prompt, config, fetchImpl = gl
       body: JSON.stringify({
         model: settings.model,
         messages: [
-          { role: "system", content: CHAT_SYSTEM_PROMPT },
+          { role: "system", content: settings.systemPrompt || CHAT_SYSTEM_PROMPT },
           { role: "user", content: text },
         ],
         temperature: 0.4,

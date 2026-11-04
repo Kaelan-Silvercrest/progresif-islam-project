@@ -49,6 +49,7 @@ const { generateProviderResponse } = require("./ai-providers.js");
 const { downloadYouTubeMp3, removeDownloadedFile } = require("./youtube.js");
 const { createSticker } = require("./sticker.js");
 const { renderMathSolution } = require("./math-image.js");
+const { generateCloudflareImage } = require("./cloudflare-image.js");
 
 const logger = pino({ level: "silent" }); // ganti ke "info" untuk debug baileys
 const botGeneratedMessageIds = new Set();
@@ -289,6 +290,11 @@ async function startBot() {
       return;
     }
 
+    if (/^\.image(?:\s|$)/i.test(text.trim())) {
+      await handleImageCommand(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
+      return;
+    }
+
     if (/^\.verifstatus(?:\s|$)/i.test(text.trim())) {
       await handleVerificationStatus(sock, remoteJid, senderNumber);
       return;
@@ -299,7 +305,7 @@ async function startBot() {
       return;
     }
 
-    if (/^\.(groq|gemini|openrouter|cerebras)(?:\s|$)/i.test(text.trim())) {
+    if (/^\.(groq|gemini|openrouter|soshumai|cerebras)(?:\s|$)/i.test(text.trim())) {
       await handleProviderAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
       return;
     }
@@ -643,12 +649,13 @@ async function handleMathAiChat(sock, chatJid, senderJid, text) {
 }
 
 async function handleProviderAiChat(sock, chatJid, senderJid, text) {
-  const match = text.match(/^\.(groq|gemini|openrouter|cerebras)(?:\s+([\s\S]*))?$/i);
+  const match = text.match(/^\.(groq|gemini|openrouter|soshumai|cerebras)(?:\s+([\s\S]*))?$/i);
   if (!match) return false;
-  const provider = match[1].toLowerCase();
+  const command = match[1].toLowerCase();
+  const provider = command === "soshumai" ? "openrouter-soshum" : command;
   const prompt = (match[2] || "").trim();
   if (!prompt) {
-    await sock.sendMessage(chatJid, { text: `Format: .${provider} <pertanyaan>` });
+    await sock.sendMessage(chatJid, { text: `Format: .${command} <pertanyaan>` });
     return true;
   }
   if (!cfg.AI_PROVIDER_CHAT_ENABLED) {
@@ -662,7 +669,7 @@ async function handleProviderAiChat(sock, chatJid, senderJid, text) {
     return true;
   }
   if (cfg.DRY_RUN) {
-    console.log(`[SIMULASI] Chat ${provider} diminta di ${chatJid}; prompt tidak dikirim ke provider.`);
+    console.log(`[SIMULASI] Chat ${command} diminta di ${chatJid}; prompt tidak dikirim ke provider.`);
     return true;
   }
   if (aiRequestInFlight) {
@@ -671,12 +678,12 @@ async function handleProviderAiChat(sock, chatJid, senderJid, text) {
   }
 
   const number = numberFromJid(senderJid || chatJid);
-  const cooldownKey = `ai-${provider}`;
+  const cooldownKey = `ai-${command}`;
   const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, cooldownKey);
   const cooldownLeft = cfg.OLLAMA_CHAT_COOLDOWN_MS - (Date.now() - lastUsed);
   if (cooldownLeft > 0) {
     await sock.sendMessage(chatJid, {
-      text: `AI ${provider} bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
+      text: `AI ${command} bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
     });
     return true;
   }
@@ -685,14 +692,89 @@ async function handleProviderAiChat(sock, chatJid, senderJid, text) {
   aiRequestInFlight = true;
   try {
     const answer = await generateProviderResponse(provider, prompt, cfg);
-    await sock.sendMessage(chatJid, { text: answer });
+    const chunks = command === "soshumai" ? splitTextIntoChunks(answer, 3500) : [answer];
+    for (const [index, chunk] of chunks.entries()) {
+      await sock.sendMessage(chatJid, {
+        text: chunks.length > 1 ? `Bagian ${index + 1}/${chunks.length}\n${chunk}` : chunk,
+      });
+    }
   } catch (error) {
-    console.error(`[AI ${provider.toUpperCase()}] Permintaan gagal: ${error?.message || "error tidak diketahui"}`);
+    console.error(`[AI ${command.toUpperCase()}] Permintaan gagal: ${error?.message || "error tidak diketahui"}`);
     const missingKey = error?.message === "API key belum diatur pada environment.";
     await sock.sendMessage(chatJid, {
       text: missingKey
-        ? `API key ${provider} belum diatur. Isi ${provider.toUpperCase()}_API_KEY di file .env lalu mulai ulang bot.`
-        : `AI ${provider} gagal: ${String(error?.message || "provider tidak tersedia").slice(0, 300)}`,
+        ? `API key ${command === "soshumai" ? "OPENROUTER_API_KEY" : `${command.toUpperCase()}_API_KEY`} belum diatur di file .env lalu mulai ulang bot.`
+        : `AI ${command} gagal: ${String(error?.message || "provider tidak tersedia").slice(0, 300)}`,
+    });
+  } finally {
+    aiRequestInFlight = false;
+  }
+  return true;
+}
+
+function splitTextIntoChunks(text, maxLength) {
+  const chunks = [];
+  let remaining = String(text || "");
+  while (remaining.length > maxLength) {
+    let splitAt = remaining.lastIndexOf("\n", maxLength);
+    if (splitAt < maxLength * 0.6) splitAt = remaining.lastIndexOf(" ", maxLength);
+    if (splitAt < maxLength * 0.6) splitAt = maxLength;
+    chunks.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+async function handleImageCommand(sock, chatJid, senderJid, text) {
+  const match = text.match(/^\.image(?:\s+([\s\S]*))?$/i);
+  if (!match) return false;
+  const prompt = (match[1] || "").trim();
+  if (!prompt) {
+    await sock.sendMessage(chatJid, { text: "Format: .image <deskripsi gambar yang ingin dibuat>" });
+    return true;
+  }
+  if (prompt.length > 1000) {
+    await sock.sendMessage(chatJid, { text: "Prompt terlalu panjang. Maksimal 1000 karakter." });
+    return true;
+  }
+  if (cfg.DRY_RUN) {
+    console.log(`[SIMULASI] Pembuatan gambar diminta di ${chatJid}; prompt tidak dikirim ke Cloudflare.`);
+    return true;
+  }
+  if (aiRequestInFlight) {
+    await sock.sendMessage(chatJid, { text: "AI sedang memproses permintaan lain; coba lagi sebentar." });
+    return true;
+  }
+
+  const number = numberFromJid(senderJid || chatJid);
+  const cooldownKey = "ai-image";
+  const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, cooldownKey);
+  const cooldownLeft = cfg.CLOUDFLARE_IMAGE_COOLDOWN_MS - (Date.now() - lastUsed);
+  if (cooldownLeft > 0) {
+    await sock.sendMessage(chatJid, {
+      text: `Pembuatan gambar bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
+    });
+    return true;
+  }
+
+  store.markGroupMemberCommandUsed(chatJid, number, cooldownKey, Date.now());
+  aiRequestInFlight = true;
+  try {
+    await sock.sendMessage(chatJid, { text: "Sedang membuat gambar AI, mohon tunggu..." });
+    const image = await generateCloudflareImage(prompt, cfg);
+    await sock.sendMessage(chatJid, {
+      image: image.buffer,
+      mimetype: image.mimetype,
+      caption: `Hasil untuk: ${prompt.slice(0, 900)}`,
+    });
+  } catch (error) {
+    console.error(`[AI IMAGE] Permintaan gagal: ${error?.message || "error tidak diketahui"}`);
+    const missingCredentials = error?.message === "Account ID atau API Token Cloudflare belum diatur.";
+    await sock.sendMessage(chatJid, {
+      text: missingCredentials
+        ? "Cloudflare Workers AI belum dikonfigurasi. Isi CLOUDFLARE_ACCOUNT_ID dan CLOUDFLARE_API_TOKEN di file .env lalu mulai ulang bot."
+        : `Gagal membuat gambar: ${String(error?.message || "Cloudflare Workers AI tidak tersedia").slice(0, 300)}`,
     });
   } finally {
     aiRequestInFlight = false;
@@ -751,12 +833,17 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
     return;
   }
 
+  if (/^\.image(?:\s|$)/i.test(text.trim())) {
+    await handleImageCommand(sock, groupJid, senderJid, text.trim());
+    return;
+  }
+
   if (/^\.mathai(?:\s|$)/i.test(text.trim())) {
     await handleMathAiChat(sock, groupJid, senderJid, text.trim());
     return;
   }
 
-  if (/^\.(groq|gemini|openrouter|cerebras)(?:\s|$)/i.test(text.trim())) {
+  if (/^\.(groq|gemini|openrouter|soshumai|cerebras)(?:\s|$)/i.test(text.trim())) {
     await handleProviderAiChat(sock, groupJid, senderJid, text.trim());
     return;
   }
@@ -1918,9 +2005,11 @@ const MENU_TEXT =
   ".lapor @anggota [alasan]\n\n" +
   "🤖 *MENU AI*\n" +
   ".mathai <soal> (DeepScaleR lokal via Ollama)\n" +
+  ".image <deskripsi> (generate gambar via Cloudflare Workers AI)\n" +
   ".groq <pertanyaan>\n" +
   ".gemini <pertanyaan>\n" +
   ".openrouter <pertanyaan>\n" +
+  ".soshumai <pertanyaan sosial-humaniora> (OpenRouter Nemotron)\n" +
   ".cerebras <pertanyaan>\n\n" +
   "🔐 *VERIFIKASI — KHUSUS OWNER (lewat DM bot)*\n" +
   ".pending\n" +
@@ -2402,6 +2491,7 @@ module.exports = {
   handleGroupModerationCommand,
   handleMathAiChat,
   handleProviderAiChat,
+  handleImageCommand,
   handleMp3Command,
   handleStickerCommand,
   handleTranslateCommand,

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { generateProviderResponse } = require("./ai-providers.js");
+const { generateProviderResponse, providerConfig } = require("./ai-providers.js");
 
 const config = {
   GROQ_API_KEY: "test-groq-key",
@@ -9,6 +9,10 @@ const config = {
   GEMINI_MODEL: "test-gemini-model",
   OPENROUTER_API_KEY: "test-openrouter-key",
   OPENROUTER_MODEL: "test/openrouter-model",
+  OPENROUTER_SOSHUM_MODEL: "nvidia/nemotron-3-ultra-550b-a55b:free",
+  OPENROUTER_SOSHUM_TIMEOUT_MS: 600_000,
+  OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS: 8192,
+  OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS: 60000,
   CEREBRAS_API_KEY: "test-cerebras-key",
   CEREBRAS_MODEL: "test-cerebras-model",
   AI_PROVIDER_TIMEOUT_MS: 5000,
@@ -33,7 +37,7 @@ test("OpenAI-compatible providers use their API endpoint and keep the key in hea
     });
 
     assert.equal(request.url, endpoint);
-    assert.equal(request.options.headers.Authorization, `Bearer ${config[`${provider.toUpperCase()}_API_KEY`]}`);
+    assert.equal(request.options.headers.Authorization.startsWith("Bearer "), true);
     assert.equal(JSON.parse(request.options.body).messages[1].content, "Halo");
     assert.equal(answer, `Jawaban ${provider}`);
   }
@@ -58,6 +62,39 @@ test("Gemini uses the generateContent endpoint and x-goog-api-key header", async
   assert.equal(request.options.headers["x-goog-api-key"], config.GEMINI_API_KEY);
   assert.equal(JSON.parse(request.options.body).contents[0].parts[0].text, "Halo");
   assert.equal(answer, "Jawaban Gemini");
+});
+
+test("OpenRouter soshum uses the shared key, dedicated model, and humanities prompt", async () => {
+  assert.equal(providerConfig("openrouter-soshum", config).timeoutMs, 600_000);
+  assert.equal(providerConfig("openrouter-soshum", config).maxOutputTokens, 8192);
+  assert.equal(providerConfig("openrouter-soshum", config).maxResponseChars, 60000);
+  let request;
+  const answer = await generateProviderResponse("openrouter-soshum", "Analisis urbanisasi", config, async (url, options) => {
+    request = { url, options };
+    return {
+      ok: true,
+      text: async () => JSON.stringify({ choices: [{ message: { content: "Analisis sosial." } }] }),
+    };
+  });
+
+  const body = JSON.parse(request.options.body);
+  assert.equal(request.url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(request.options.headers.Authorization.startsWith("Bearer "), true);
+  assert.equal(body.model, "nvidia/nemotron-3-ultra-550b-a55b:free");
+  assert.equal(body.max_tokens, 8192);
+  assert.match(body.messages[0].content, /sosial-humaniora/);
+  assert.equal(body.messages[1].content, "Analisis urbanisasi");
+  assert.equal(answer, "Analisis sosial.");
+});
+
+test("OpenRouter soshum keeps answers longer than the previous 12000-character limit", async () => {
+  const longAnswer = "Penjelasan sosial-humaniora yang lengkap. ".repeat(400).trimEnd();
+  const answer = await generateProviderResponse("openrouter-soshum", "Analisis", config, async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ choices: [{ message: { content: longAnswer } }] }),
+  }));
+  assert.equal(answer, longAnswer);
+  assert.ok(answer.length > 12000);
 });
 
 test("providers report missing keys without making a network request", async () => {

@@ -8,6 +8,8 @@ const store = require("./store.js");
 const {
   handleOwnerCommand,
   handleProviderAiChat,
+  handleImageCommand,
+  handleGroupMessage,
   handleMathAiChat,
   sendMenu,
   handleTranslateCommand,
@@ -48,6 +50,99 @@ test("math solution is rendered as one or more PNG pages", () => {
     assert.equal(image.readUInt32BE(16), 1080);
     assert.equal(image.readUInt32BE(20), 1800);
   }
+});
+
+test(".image generates and sends an image through Cloudflare Workers AI", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalDryRun = cfg.DRY_RUN;
+  const originalAccountId = cfg.CLOUDFLARE_ACCOUNT_ID;
+  const originalApiToken = cfg.CLOUDFLARE_API_TOKEN;
+  const originalModel = cfg.CLOUDFLARE_IMAGE_MODEL;
+  const originalGetCooldown = store.getGroupMemberCommandLastUsedAt;
+  const originalMarkCooldown = store.markGroupMemberCommandUsed;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    cfg.DRY_RUN = originalDryRun;
+    cfg.CLOUDFLARE_ACCOUNT_ID = originalAccountId;
+    cfg.CLOUDFLARE_API_TOKEN = originalApiToken;
+    cfg.CLOUDFLARE_IMAGE_MODEL = originalModel;
+    store.getGroupMemberCommandLastUsedAt = originalGetCooldown;
+    store.markGroupMemberCommandUsed = originalMarkCooldown;
+  });
+  cfg.DRY_RUN = false;
+  cfg.CLOUDFLARE_ACCOUNT_ID = "test-account";
+  cfg.CLOUDFLARE_API_TOKEN = "test-token";
+  cfg.CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
+  store.getGroupMemberCommandLastUsedAt = () => 0;
+  store.markGroupMemberCommandUsed = () => {};
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  let requestBody;
+  globalThis.fetch = async (url, options) => {
+    assert.match(url, /\/ai\/run\/@cf\/black-forest-labs\/flux-1-schnell$/);
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => image,
+    };
+  };
+
+  const messages = [];
+  await handleImageCommand({
+    sendMessage: async (jid, content) => messages.push({ jid, ...content }),
+  }, "user@s.whatsapp.net", "user@s.whatsapp.net", ".image Kucing astronaut");
+
+  assert.deepEqual(requestBody, { prompt: "Kucing astronaut" });
+  assert.match(messages[0].text, /Sedang membuat gambar AI/);
+  assert.deepEqual(messages[1].image, image);
+  assert.equal(messages[1].mimetype, "image/png");
+  assert.match(messages[1].caption, /Kucing astronaut/);
+});
+
+test(".image works in registered groups", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalDryRun = cfg.DRY_RUN;
+  const originalModeration = cfg.AUTO_MODERATION_ENABLED;
+  const originalAccountId = cfg.CLOUDFLARE_ACCOUNT_ID;
+  const originalApiToken = cfg.CLOUDFLARE_API_TOKEN;
+  const originalModel = cfg.CLOUDFLARE_IMAGE_MODEL;
+  const originalGetGroup = store.getGroup;
+  const originalGetCooldown = store.getGroupMemberCommandLastUsedAt;
+  const originalMarkCooldown = store.markGroupMemberCommandUsed;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    cfg.DRY_RUN = originalDryRun;
+    cfg.AUTO_MODERATION_ENABLED = originalModeration;
+    cfg.CLOUDFLARE_ACCOUNT_ID = originalAccountId;
+    cfg.CLOUDFLARE_API_TOKEN = originalApiToken;
+    cfg.CLOUDFLARE_IMAGE_MODEL = originalModel;
+    store.getGroup = originalGetGroup;
+    store.getGroupMemberCommandLastUsedAt = originalGetCooldown;
+    store.markGroupMemberCommandUsed = originalMarkCooldown;
+  });
+  cfg.DRY_RUN = false;
+  cfg.AUTO_MODERATION_ENABLED = false;
+  cfg.CLOUDFLARE_ACCOUNT_ID = "test-account";
+  cfg.CLOUDFLARE_API_TOKEN = "test-token";
+  cfg.CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
+  store.getGroup = () => ({ jid: "group@g.us", name: "Grup uji" });
+  store.getGroupMemberCommandLastUsedAt = () => 0;
+  store.markGroupMemberCommandUsed = () => {};
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  globalThis.fetch = async () => ({
+    ok: true,
+    headers: { get: () => "image/png" },
+    arrayBuffer: async () => image,
+  });
+  const messages = [];
+
+  await handleGroupMessage({
+    sendMessage: async (jid, content) => messages.push({ jid, ...content }),
+  }, "group@g.us", "12345@s.whatsapp.net", ".image matahari terbit", {}, false);
+
+  assert.equal(messages[0].jid, "group@g.us");
+  assert.match(messages[0].text, /Sedang membuat gambar AI/);
+  assert.deepEqual(messages[1].image, image);
 });
 
 test("long math solutions are split across PNG pages", () => {
@@ -200,4 +295,60 @@ test("provider AI commands explain how to configure a missing key", async (t) =>
   }, "user@s.whatsapp.net", "user@s.whatsapp.net", ".groq Halo");
 
   assert.match(messages[0].text, /GROQ_API_KEY/);
+});
+
+test(".soshumai routes to the dedicated OpenRouter model", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalDryRun = cfg.DRY_RUN;
+  const originalEnabled = cfg.AI_PROVIDER_CHAT_ENABLED;
+  const originalApiKey = cfg.OPENROUTER_API_KEY;
+  const originalModel = cfg.OPENROUTER_SOSHUM_MODEL;
+  const originalMaxTokens = cfg.OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS;
+  const originalMaxChars = cfg.OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS;
+  const originalGetCooldown = store.getGroupMemberCommandLastUsedAt;
+  const originalMarkCooldown = store.markGroupMemberCommandUsed;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    cfg.DRY_RUN = originalDryRun;
+    cfg.AI_PROVIDER_CHAT_ENABLED = originalEnabled;
+    cfg.OPENROUTER_API_KEY = originalApiKey;
+    cfg.OPENROUTER_SOSHUM_MODEL = originalModel;
+    cfg.OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS = originalMaxTokens;
+    cfg.OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS = originalMaxChars;
+    store.getGroupMemberCommandLastUsedAt = originalGetCooldown;
+    store.markGroupMemberCommandUsed = originalMarkCooldown;
+  });
+  cfg.DRY_RUN = false;
+  cfg.AI_PROVIDER_CHAT_ENABLED = true;
+  cfg.OPENROUTER_API_KEY = "test-openrouter-key";
+  cfg.OPENROUTER_SOSHUM_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+  cfg.OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS = 8192;
+  cfg.OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS = 60000;
+  store.getGroupMemberCommandLastUsedAt = () => 0;
+  store.markGroupMemberCommandUsed = () => {};
+  let requestBody;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "Analisis sosial. ".repeat(300) } }],
+      }),
+    };
+  };
+  const messages = [];
+
+  await handleProviderAiChat({
+    sendMessage: async (jid, content) => messages.push({ jid, ...content }),
+  }, "user@s.whatsapp.net", "user@s.whatsapp.net", ".soshumai Jelaskan urbanisasi");
+
+  assert.equal(requestBody.model, "nvidia/nemotron-3-ultra-550b-a55b:free");
+  assert.equal(requestBody.max_tokens, 8192);
+  assert.match(requestBody.messages[0].content, /sosial-humaniora/);
+  assert.equal(requestBody.messages[1].content, "Jelaskan urbanisasi");
+  assert.equal(messages.length, 2);
+  assert.match(messages[0].text, /^Bagian 1\/2\n/);
+  assert.match(messages[1].text, /^Bagian 2\/2\n/);
+  assert.ok(messages.every((message) => message.text.length <= 3512));
 });

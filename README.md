@@ -19,6 +19,7 @@ berjalan dengan Node.js. Bot tidak memerlukan Chromium atau Puppeteer.
 - Menyediakan moderasi berbasis aturan lokal serta moderasi AI melalui Ollama.
 - Menyediakan downloader audio MP3 publik melalui command `.mp3 <link YouTube>` dengan batas durasi, ukuran, dan cooldown.
 - Menyediakan chatbot Ollama lokal serta provider cloud melalui Groq, Gemini, OpenRouter, dan Cerebras.
+- Menyediakan pembuatan gambar AI dengan Cloudflare Workers AI melalui `.image <deskripsi>`.
 - Menyediakan broadcast owner ke semua grup terdaftar, pemeriksaan status verifikasi, pembuatan sticker dari gambar/GIF, dan terjemahan teks.
 
 ## Persyaratan
@@ -58,20 +59,29 @@ ollama pull qwen2.5:3b
 ```
 
 Untuk menggunakan provider AI cloud, buat file `.env` di folder proyek dan
-masukkan nama variabel serta API key yang sesuai. Contoh isi:
+masukkan nama variabel serta API key/token yang sesuai. Contoh isi:
 
 ```env
 GROQ_API_KEY=isi_api_key_groq
 GEMINI_API_KEY=isi_api_key_gemini
 OPENROUTER_API_KEY=isi_api_key_openrouter
 CEREBRAS_API_KEY=isi_api_key_cerebras
+
+# Cloudflare Workers AI untuk command .image
+CLOUDFLARE_ACCOUNT_ID=isi_account_id_cloudflare
+CLOUDFLARE_API_TOKEN=isi_api_token_cloudflare
 MENU_IMAGE_PATH=/path/ke/gambar-menu.png
 
 # Opsional: ganti model default.
 # GROQ_MODEL=qwen/qwen3.8-27b
 # GEMINI_MODEL=gemini-3.8-flash
 # OPENROUTER_MODEL=openai/gpt-4o-mini
+# OPENROUTER_SOSHUM_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+# OPENROUTER_SOSHUM_TIMEOUT_MS=600000
+# OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS=8192
+# OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS=60000
 # CEREBRAS_MODEL=llama-3.3-70b
+# CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
 ```
 
 Jangan tambahkan tanda kutip atau spasi di sekitar nilai API key. Setelah
@@ -163,9 +173,11 @@ perintah khusus pemilik.
 | `.profil` | Menampilkan skor dan peringkat pengguna. |
 | `.jurnal <topik>` | Mencari metadata artikel jurnal melalui Crossref. |
 | `.mathai <soal>` | Menyelesaikan soal matematika menggunakan DeepScaleR lokal melalui Ollama. |
+| `.image <deskripsi>` | Membuat gambar dari prompt menggunakan Cloudflare Workers AI. Memerlukan `CLOUDFLARE_ACCOUNT_ID` dan `CLOUDFLARE_API_TOKEN` di `.env`. |
 | `.groq <pertanyaan>` | Mengirim pertanyaan ke Groq. Memerlukan `GROQ_API_KEY` di `.env`. |
 | `.gemini <pertanyaan>` | Mengirim pertanyaan ke Gemini. Memerlukan `GEMINI_API_KEY` di `.env`. |
 | `.openrouter <pertanyaan>` | Mengirim pertanyaan ke OpenRouter. Memerlukan `OPENROUTER_API_KEY` di `.env`. |
+| `.soshumai <pertanyaan>` | Menjawab pertanyaan sosial-humaniora melalui model Nemotron di OpenRouter. Menggunakan `OPENROUTER_API_KEY` yang sama; model dapat diatur lewat `OPENROUTER_SOSHUM_MODEL`. |
 | `.cerebras <pertanyaan>` | Mengirim pertanyaan ke Cerebras. Memerlukan `CEREBRAS_API_KEY` di `.env`. |
 | `.mp3 <link YouTube>` | Mengunduh audio dari video YouTube dan mengirimkannya sebagai MP3. Dapat digunakan semua pengguna di DM atau grup terdaftar. |
 | `.sticker` | Mengubah gambar atau GIF menjadi sticker. Kirim gambar/GIF dengan caption `.sticker`, atau balas gambar/GIF dengan command ini. |
@@ -238,8 +250,38 @@ model matematika tidak mengubah classifier moderasi. Jika moderasi AI Ollama
 diaktifkan, unduh juga dengan `ollama pull qwen2.5:3b`.
 
 Alternatif provider cloud tersedia melalui `.groq`, `.gemini`, `.openrouter`,
-dan `.cerebras`, masing-masing diikuti pertanyaan. Model tiap provider dapat
-diubah lewat variabel `*_MODEL` di `.env`.
+`.soshumai`, dan `.cerebras`, masing-masing diikuti pertanyaan. `.openrouter`
+menggunakan model dari `OPENROUTER_MODEL`, sedangkan `.soshumai` menggunakan
+key `OPENROUTER_API_KEY` yang sama dengan model khusus dari
+`OPENROUTER_SOSHUM_MODEL` (default `nvidia/nemotron-3-ultra-550b-a55b:free`)
+dan instruksi yang difokuskan pada pertanyaan sosial-humaniora. Ganti nilai
+default di `.env` bila model tersebut tidak tersedia di akun OpenRouter.
+Timeout `.soshumai` adalah sepuluh menit secara default dan dapat diubah lewat
+`OPENROUTER_SOSHUM_TIMEOUT_MS` (dalam milidetik); provider lain tetap
+menggunakan `AI_PROVIDER_TIMEOUT_MS`. Jawaban `.soshumai` dapat menggunakan
+hingga 8.192 token dan 60.000 karakter; jawaban panjang otomatis dikirim dalam
+beberapa pesan. Batas tersebut dapat diubah lewat
+`OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS` dan
+`OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS`.
+`.image <deskripsi>` membuat
+gambar melalui Cloudflare Workers AI. Untuk mengaktifkannya:
+
+1. Di Cloudflare Dashboard, buka akun yang akan menjalankan Workers AI dan
+   salin **Account ID** dari halaman akun.
+2. Buat API Token Cloudflare dengan izin Workers AI yang diperlukan untuk
+   menjalankan model pada akun tersebut. Jangan gunakan atau bagikan Global API
+   Key.
+3. Tambahkan `CLOUDFLARE_ACCOUNT_ID` dan `CLOUDFLARE_API_TOKEN` ke `.env` di
+   direktori proyek, mengganti nilai contoh dengan nilai akun/token milikmu.
+4. Simpan file lalu mulai ulang bot. Uji dengan `.image kucing astronot`.
+
+Model gambar default adalah `@cf/black-forest-labs/flux-1-schnell` dan dapat
+diubah lewat `CLOUDFLARE_IMAGE_MODEL`. Prompt gambar dibatasi 1.000 karakter
+dan ada jeda 60 detik per pengguna/chat. Pembuatan gambar menggunakan layanan
+Cloudflare Workers AI dan dapat dikenai batas pemakaian atau biaya sesuai
+ketentuan akun Cloudflare.
+
+Model tiap provider chat dapat diubah lewat variabel `*_MODEL` di `.env`.
 Prompt yang dikirim ke provider cloud akan diproses oleh layanan provider
 tersebut; jangan kirim data sensitif.
 
@@ -319,6 +361,12 @@ Pengaturan bot berada di `config.js`. Nilai yang umum disesuaikan meliputi:
 | `MP3_MAX_FILE_SIZE_BYTES` | Ukuran maksimum file MP3 yang dikirim. |
 | `MP3_DOWNLOAD_TIMEOUT_MS` | Batas waktu proses metadata dan download. |
 | `MP3_OUTPUT_DIR` | Direktori sementara file MP3. |
+| `CLOUDFLARE_IMAGE_MODEL` | Model Workers AI untuk `.image`. Nilai bawaan `@cf/black-forest-labs/flux-1-schnell`. |
+| `CLOUDFLARE_IMAGE_TIMEOUT_MS` | Batas waktu pembuatan gambar. Nilai bawaan dua menit. |
+| `CLOUDFLARE_IMAGE_COOLDOWN_MS` | Jeda pemakaian `.image` per pengguna/chat. Nilai bawaan 60 detik. |
+| `OPENROUTER_SOSHUM_TIMEOUT_MS` | Batas waktu `.soshumai` dalam milidetik. Nilai bawaan sepuluh menit. |
+| `OPENROUTER_SOSHUM_MAX_OUTPUT_TOKENS` | Batas token jawaban `.soshumai`. Nilai bawaan 8.192. |
+| `OPENROUTER_SOSHUM_MAX_RESPONSE_CHARS` | Batas karakter jawaban `.soshumai`. Nilai bawaan 60.000. |
 
 Pengaturan tambahan untuk pertanyaan verifikasi, batas permainan, jajak
 pendapat, pencocokan kata moderasi, dan templat pesan tersedia di `config.js`.
