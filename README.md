@@ -45,12 +45,28 @@ autentikasi akan tersimpan secara lokal.
 Atur nomor pemilik bot pada `OWNER_NUMBER` di `config.js`. Gunakan format
 internasional tanpa tanda tambah, spasi, atau tanda hubung.
 
-Untuk menggunakan provider AI, salin `.env.example` menjadi `.env` di mesin
-tempat bot berjalan, lalu isi API key provider di `.env`. File `.env` sudah
-diabaikan Git; jangan pernah memasukkan API key ke source code atau commit.
-Pada hosting, simpan key sebagai environment variables/secrets di pengaturan
-hosting. Perubahan kode dapat di-push dan di-deploy tanpa mengirim atau
-memasukkan ulang key.
+Untuk menggunakan provider AI cloud, buat file `.env` di folder proyek dan
+masukkan nama variabel serta API key yang sesuai. Contoh isi:
+
+```env
+GROQ_API_KEY=isi_api_key_groq
+GEMINI_API_KEY=isi_api_key_gemini
+OPENROUTER_API_KEY=isi_api_key_openrouter
+CEREBRAS_API_KEY=isi_api_key_cerebras
+
+# Opsional: ganti model default.
+# GROQ_MODEL=qwen/qwen3.8-27b
+# GEMINI_MODEL=gemini-3.8-flash
+# OPENROUTER_MODEL=openai/gpt-4o-mini
+# CEREBRAS_MODEL=llama-3.3-70b
+```
+
+Jangan tambahkan tanda kutip atau spasi di sekitar nilai API key. Setelah
+membuat atau mengubah `.env`, mulai ulang bot agar konfigurasi baru dimuat.
+File `.env` sudah diabaikan Git: jangan pernah memasukkan API key ke source
+code, mengirimnya ke orang lain, atau commit file tersebut. Pada hosting, isi
+key sebagai environment variables/secrets di pengaturan hosting. Perubahan kode
+bisa di-push dan di-deploy tanpa mengirim atau memasukkan ulang key.
 
 ## Menyiapkan Grup
 
@@ -196,11 +212,11 @@ pertanyaan. Model tiap provider dapat diubah lewat variabel `*_MODEL` di `.env`.
 Prompt yang dikirim ke provider cloud akan diproses oleh layanan provider
 tersebut; jangan kirim data sensitif.
 
-Untuk menyiapkan key di komputer lokal, salin `.env.example` sebagai `.env`,
-lalu isi key yang baru dibuat. Jangan bagikan atau commit file `.env`. Jika key
-pernah terpublikasi, cabut key tersebut di dashboard provider dan gunakan key
-baru. Di server hosting, masukkan key pada pengaturan environment variables atau
-secrets agar tetap tersimpan saat kode diperbarui.
+Atur key provider di `.env` lokal seperti dijelaskan pada bagian instalasi.
+Jangan bagikan atau commit file `.env`. Jika key pernah terpublikasi, cabut key
+tersebut di dashboard provider dan gunakan key baru. Di server hosting, masukkan
+key pada pengaturan environment variables atau secrets agar tetap tersimpan saat
+kode diperbarui.
 
 ### Moderasi Grup
 
