@@ -16,7 +16,18 @@ function timeoutSignal(config) {
   return AbortSignal.timeout(Math.max(500, Number(config.OLLAMA_TIMEOUT_MS) || 7000));
 }
 
-async function getOllamaStatus(config, fetchImpl = globalThis.fetch) {
+function modelIsInstalled(models, modelName) {
+  const requestedName = String(modelName || "").replace(/:latest$/, "");
+  return models.some((model) =>
+    String(model.name || "").replace(/:latest$/, "") === requestedName
+  );
+}
+
+async function getOllamaStatus(
+  config,
+  fetchImpl = globalThis.fetch,
+  modelName = config.OLLAMA_MODERATION_MODEL || config.OLLAMA_MODEL
+) {
   try {
     const response = await fetchImpl(ollamaUrl(config, "/api/tags"), {
       signal: timeoutSignal(config),
@@ -24,13 +35,23 @@ async function getOllamaStatus(config, fetchImpl = globalThis.fetch) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     const models = Array.isArray(payload.models) ? payload.models : [];
+    const installedModels = models.map((model) => model.name);
     return {
       available: true,
-      modelInstalled: models.some((model) => model.name === config.OLLAMA_MODEL),
-      models: models.map((model) => model.name),
+      modelInstalled: modelIsInstalled(models, modelName),
+      mathModelInstalled: modelIsInstalled(models, config.OLLAMA_MODEL),
+      modelName,
+      models: installedModels,
     };
   } catch (error) {
-    return { available: false, modelInstalled: false, models: [], error: error?.message || "Ollama tidak tersedia" };
+    return {
+      available: false,
+      modelInstalled: false,
+      mathModelInstalled: false,
+      modelName,
+      models: [],
+      error: error?.message || "Ollama tidak tersedia",
+    };
   }
 }
 
@@ -59,7 +80,7 @@ async function classifyTargetedAbuse(text, config, fetchImpl = globalThis.fetch)
     headers: { "Content-Type": "application/json" },
     signal: timeoutSignal(config),
     body: JSON.stringify({
-      model: config.OLLAMA_MODEL,
+      model: config.OLLAMA_MODERATION_MODEL || config.OLLAMA_MODEL,
       stream: false,
       format: "json",
       options: { temperature: 0 },
@@ -79,31 +100,56 @@ async function classifyTargetedAbuse(text, config, fetchImpl = globalThis.fetch)
   return parseDecision(payload?.message?.content);
 }
 
-async function generateChatResponse(prompt, config, fetchImpl = globalThis.fetch) {
-  const timeoutMs = Math.max(1000, Number(config.OLLAMA_CHAT_TIMEOUT_MS) || 15_000);
+function removeReasoningBlock(content) {
+  const text = String(content || "");
+  const closingTag = text.lastIndexOf("</think>");
+  if (closingTag >= 0) return text.slice(closingTag + "</think>".length).trim();
+  return text.replace(/<think>[\s\S]*$/i, "").trim();
+}
+
+async function generateMathResponse(prompt, config, fetchImpl = globalThis.fetch) {
   const response = await fetchImpl(ollamaUrl(config, "/api/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: AbortSignal.timeout(Math.max(1000, Number(config.OLLAMA_MATHAI_TIMEOUT_MS) || 120_000)),
     body: JSON.stringify({
       model: config.OLLAMA_MODEL,
       stream: false,
-      options: { temperature: 0.4, num_predict: 384 },
+      options: {
+        temperature: 0.6,
+        top_p: 0.95,
+        num_predict: config.OLLAMA_MATHAI_MAX_OUTPUT_TOKENS || 2048,
+      },
       messages: [
         {
           role: "system",
-          content: "Kamu Ronan Calloway Bot, chatbot komunitas yang ramah, inklusif, dan membantu. Jawab dalam bahasa yang dipakai pengguna, utamakan Bahasa Indonesia. Jawab ringkas dan jelas, maksimal beberapa paragraf. Jangan mengarang sumber atau mengaku melakukan tindakan di luar chat.",
+          content:
+            "Kamu adalah asisten matematika Ronan Calloway Bot. Selesaikan soal dengan teliti, " +
+            "periksa kembali perhitungan dan jawaban akhir. Tampilkan langkah penyelesaian " +
+            "yang ringkas dan mudah diikuti, rumus penting, lalu jawaban akhir dengan jelas. " +
+            "Jangan mengarang asumsi; jika soal ambigu, jelaskan bagian yang perlu diperjelas. " +
+            "Jangan tampilkan tag <think> atau penalaran internal; berikan hanya penjelasan " +
+            "solusi yang relevan untuk pengguna. Untuk rumus, gunakan LaTeX yang valid dan " +
+            "bungkus rumus display dengan \\[...\\], rumus inline dengan \\(...\\). Pisahkan " +
+            "langkah-langkah dengan baris baru. Tulis uraian dalam Markdown sederhana; hindari " +
+            "tabel dan jangan masukkan uraian bahasa ke dalam lingkungan matematika.",
         },
-        { role: "user", content: String(prompt).slice(0, config.OLLAMA_CHAT_MAX_PROMPT_CHARS || 1200) },
+        { role: "user", content: String(prompt).slice(0, config.OLLAMA_MATHAI_MAX_PROMPT_CHARS || 6000) },
       ],
     }),
   });
 
   if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
   const payload = await response.json();
-  const answer = String(payload?.message?.content || "").trim();
-  if (!answer) throw new Error("Ollama mengembalikan jawaban kosong");
-  return answer.slice(0, config.OLLAMA_CHAT_MAX_RESPONSE_CHARS || 1800);
+  const answer = removeReasoningBlock(payload?.message?.content);
+  if (!answer) throw new Error("DeepScaleR tidak mengembalikan solusi yang dapat ditampilkan");
+  return answer.slice(0, config.OLLAMA_MATHAI_MAX_RESPONSE_CHARS || 6000);
 }
 
-module.exports = { classifyTargetedAbuse, generateChatResponse, getOllamaStatus, parseDecision };
+module.exports = {
+  classifyTargetedAbuse,
+  generateMathResponse,
+  getOllamaStatus,
+  parseDecision,
+  removeReasoningBlock,
+};

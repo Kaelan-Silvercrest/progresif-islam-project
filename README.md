@@ -27,7 +27,7 @@ berjalan dengan Node.js. Bot tidak memerlukan Chromium atau Puppeteer.
 - npm.
 - Akun WhatsApp untuk menjalankan bot.
 - Hak administrator bot pada setiap grup yang dipantau.
-- Ollama dan model `qwen2.5:3b` untuk menggunakan chatbot `.ai` dan penilaian moderasi AI. Aturan moderasi lokal tetap tersedia jika Ollama tidak dapat diakses.
+- Ollama dan model `deepscaler` untuk menggunakan asisten matematika `.mathai`. Model `qwen2.5:3b` tetap digunakan terpisah untuk penilaian moderasi AI jika diaktifkan.
 
 ## Instalasi dan Menjalankan Bot
 
@@ -45,6 +45,18 @@ autentikasi akan tersimpan secara lokal.
 Atur nomor pemilik bot pada `OWNER_NUMBER` di `config.js`. Gunakan format
 internasional tanpa tanda tambah, spasi, atau tanda hubung.
 
+Unduh model matematika DeepScaleR yang digunakan `.mathai` dengan:
+
+```bash
+ollama pull deepscaler
+```
+
+Jika moderasi AI Ollama juga ingin digunakan, unduh model moderasinya:
+
+```bash
+ollama pull qwen2.5:3b
+```
+
 Untuk menggunakan provider AI cloud, buat file `.env` di folder proyek dan
 masukkan nama variabel serta API key yang sesuai. Contoh isi:
 
@@ -53,6 +65,7 @@ GROQ_API_KEY=isi_api_key_groq
 GEMINI_API_KEY=isi_api_key_gemini
 OPENROUTER_API_KEY=isi_api_key_openrouter
 CEREBRAS_API_KEY=isi_api_key_cerebras
+MENU_IMAGE_PATH=/path/ke/gambar-menu.png
 
 # Opsional: ganti model default.
 # GROQ_MODEL=qwen/qwen3.8-27b
@@ -149,7 +162,7 @@ perintah khusus pemilik.
 | `.tutupoll` | Menutup jajak pendapat jika pengguna berwenang. |
 | `.profil` | Menampilkan skor dan peringkat pengguna. |
 | `.jurnal <topik>` | Mencari metadata artikel jurnal melalui Crossref. |
-| `.ai <pertanyaan>` | Mengirim pertanyaan kepada chatbot lokal berbasis Ollama. |
+| `.mathai <soal>` | Menyelesaikan soal matematika menggunakan DeepScaleR lokal melalui Ollama. |
 | `.groq <pertanyaan>` | Mengirim pertanyaan ke Groq. Memerlukan `GROQ_API_KEY` di `.env`. |
 | `.gemini <pertanyaan>` | Mengirim pertanyaan ke Gemini. Memerlukan `GEMINI_API_KEY` di `.env`. |
 | `.openrouter <pertanyaan>` | Mengirim pertanyaan ke OpenRouter. Memerlukan `OPENROUTER_API_KEY` di `.env`. |
@@ -183,7 +196,10 @@ YouTube serta hak cipta.
 
 Downloader menggunakan satu proses aktif pada satu waktu dan cooldown per
 pengguna/chat untuk mengurangi beban server. File sementara dihapus setelah
-pengiriman atau ketika proses gagal.
+pengiriman atau ketika proses gagal. Link video dinormalisasi agar parameter
+playlist/radio tidak memicu pemrosesan playlist. Sebagian video tetap tidak
+dapat diakses jika YouTube meminta login atau memblokir permintaan downloader;
+dalam kondisi tersebut bot menampilkan pesan yang menjelaskan kendalanya.
 
 ### Sticker, Terjemahan, dan Status Verifikasi
 
@@ -206,9 +222,24 @@ verifikasi.
 
 ### Provider AI
 
-Perintah `.ai` tetap menggunakan Ollama lokal. Alternatif provider cloud tersedia
-melalui `.groq`, `.gemini`, `.openrouter`, dan `.cerebras`, masing-masing diikuti
-pertanyaan. Model tiap provider dapat diubah lewat variabel `*_MODEL` di `.env`.
+Perintah `.mathai <soal>` menggunakan model DeepScaleR-1.5B-Preview dengan tag
+Ollama `deepscaler`, yang dioptimalkan untuk penalaran matematika. Model ini
+memberikan langkah penyelesaian ringkas serta jawaban akhir. Jika output model
+memuat blok penalaran internal `<think>`, bot hanya mengirim bagian jawaban
+setelah blok tersebut. Jawaban dikirim sebagai gambar PNG putih dengan rumus
+yang dirender secara visual; solusi panjang dibagi menjadi beberapa halaman.
+Unduh model dengan `ollama pull deepscaler` sebelum menggunakan command. Model
+ini mendukung konteks panjang, tetapi batas teks perintah di bot adalah 12.000 karakter.
+Ollama diberi waktu maksimum lima menit untuk menghasilkan hingga 4.096 token;
+RAM/kecepatan inferensi bergantung pada perangkat yang menjalankan Ollama.
+
+Moderasi AI tetap menggunakan model terpisah `qwen2.5:3b`, agar penggantian
+model matematika tidak mengubah classifier moderasi. Jika moderasi AI Ollama
+diaktifkan, unduh juga dengan `ollama pull qwen2.5:3b`.
+
+Alternatif provider cloud tersedia melalui `.groq`, `.gemini`, `.openrouter`,
+dan `.cerebras`, masing-masing diikuti pertanyaan. Model tiap provider dapat
+diubah lewat variabel `*_MODEL` di `.env`.
 Prompt yang dikirim ke provider cloud akan diproses oleh layanan provider
 tersebut; jangan kirim data sensitif.
 
@@ -217,6 +248,15 @@ Jangan bagikan atau commit file `.env`. Jika key pernah terpublikasi, cabut key
 tersebut di dashboard provider dan gunakan key baru. Di server hosting, masukkan
 key pada pengaturan environment variables atau secrets agar tetap tersimpan saat
 kode diperbarui.
+
+### Gambar Menu
+
+Perintah `.menu` mengirim gambar lalu teks menu. Secara default bot membaca
+`/home/ronancalloway/Downloads/furreh/afurrypfp1.png`. Jika gambar berada di
+lokasi berbeda (misalnya setelah clone ke komputer/server lain), atur
+`MENU_IMAGE_PATH` di `.env` ke path absolut gambar pada mesin yang menjalankan
+bot. Gambar tidak perlu di-commit ke repo. Jika file tidak ditemukan, bot
+mencatat error dan tetap mengirim teks menu.
 
 ### Moderasi Grup
 
@@ -264,7 +304,8 @@ Pengaturan bot berada di `config.js`. Nilai yang umum disesuaikan meliputi:
 | `VERIFICATION_GLOBAL_COOLDOWN_MS` | Jeda pengiriman pesan pembuka verifikasi. Nilai bawaan lima menit. |
 | `VERIFICATION_NUMBER_COOLDOWN_MS` | Jeda verifikasi ulang untuk nomor yang sama. Nilai bawaan 10 menit. |
 | `OLLAMA_BASE_URL` | Alamat layanan Ollama. Nilai bawaan `http://127.0.0.1:11434`. |
-| `OLLAMA_MODEL` | Model untuk chatbot dan moderasi AI. Nilai bawaan `qwen2.5:3b`. |
+| `OLLAMA_MODEL` | Model asisten matematika `.mathai`. Nilai bawaan `deepscaler`. |
+| `OLLAMA_MODERATION_MODEL` | Model classifier moderasi Ollama. Nilai bawaan `qwen2.5:3b`. |
 | `OLLAMA_MODERATION_ENABLED` | Mengaktifkan penilaian moderasi melalui Ollama. |
 | `AUTO_MODERATION_ENABLED` | Mengaktifkan moderasi otomatis berbasis aturan lokal. |
 | `MAX_WARNINGS_BEFORE_KICK` | Jumlah peringatan sebelum bot mencoba mengeluarkan anggota. Nilai bawaan tiga. |
@@ -327,8 +368,9 @@ karena pembatasan wilayah, login, atau perubahan layanan YouTube.
 **Ollama tidak tersedia**
 
 Pastikan layanan Ollama berjalan, alamat `OLLAMA_BASE_URL` benar, dan model
-`qwen2.5:3b` tersedia. Moderasi berbasis aturan lokal tetap berjalan saat
-penilaian AI tidak dapat digunakan. Perintah `.ai` memerlukan layanan Ollama.
+`deepscaler` tersedia untuk `.mathai`. Jika menggunakan moderasi AI, pastikan
+model `qwen2.5:3b` juga sudah diunduh. Moderasi berbasis aturan lokal tetap
+berjalan saat penilaian AI tidak dapat digunakan.
 
 **Fungsi Baileys tidak ditemukan**
 

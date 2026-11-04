@@ -20,6 +20,35 @@ function parseYouTubeUrl(value) {
   }
 }
 
+function canonicalYouTubeUrl(videoId) {
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+}
+
+function normalizeYouTubeError(error) {
+  const details = [error?.shortMessage, error?.stderr, error?.message]
+    .filter(Boolean)
+    .join("\n");
+  if (/sign in to confirm|confirm you(?:'|’)re not a bot|not a bot/i.test(details)) {
+    return new Error(
+      "YouTube meminta login untuk memverifikasi akses video ini. Downloader tidak dapat mengakses video tersebut saat ini."
+    );
+  }
+  if (/timed out|timeout|operation was aborted/i.test(details)) {
+    return new Error("YouTube tidak merespons sebelum batas waktu download.");
+  }
+  if (/video unavailable|private video|this video is unavailable/i.test(details)) {
+    return new Error("Video YouTube tidak tersedia untuk diakses.");
+  }
+
+  const conciseDetails = details
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("ERROR:"))
+    .at(-1)
+    ?.replace(/^ERROR:\s*/, "");
+  return new Error(conciseDetails || "yt-dlp gagal memproses video YouTube.");
+}
+
 function safeFilename(title) {
   return String(title || "audio")
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "")
@@ -28,21 +57,27 @@ function safeFilename(title) {
     .slice(0, 100) || "audio";
 }
 
-async function downloadYouTubeMp3(input, config) {
+async function downloadYouTubeMp3(input, config, ytDlpImpl = ytDlp) {
   const videoId = parseYouTubeUrl(input);
   if (!videoId) throw new Error("URL YouTube tidak valid");
+  const videoUrl = canonicalYouTubeUrl(videoId);
 
   const outputDir = path.resolve(config.MP3_OUTPUT_DIR);
   await fs.mkdir(outputDir, { recursive: true });
   const timeout = Math.max(10_000, Number(config.MP3_DOWNLOAD_TIMEOUT_MS) || 120_000);
 
-  const metadata = await ytDlp(input, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    noWarnings: true,
-    noCallHome: true,
-    socketTimeout: Math.ceil(timeout / 1000),
-  }, { timeout });
+  let metadata;
+  try {
+    metadata = await ytDlpImpl(videoUrl, {
+      dumpSingleJson: true,
+      skipDownload: true,
+      noPlaylist: true,
+      noWarnings: true,
+      socketTimeout: Math.ceil(timeout / 1000),
+    }, { timeout });
+  } catch (error) {
+    throw normalizeYouTubeError(error);
+  }
   const duration = Number(metadata.duration || 0);
   if (duration > Number(config.MP3_MAX_DURATION_SECONDS)) {
     throw new Error(`Durasi video maksimal ${Math.floor(config.MP3_MAX_DURATION_SECONDS / 60)} menit`);
@@ -52,17 +87,20 @@ async function downloadYouTubeMp3(input, config) {
   const outputTemplate = path.join(outputDir, `${outputBase}.%(ext)s`);
   const expectedFilePath = path.join(outputDir, `${outputBase}.mp3`);
 
-  await ytDlp(input, {
-    extractAudio: true,
-    audioFormat: "mp3",
-    audioQuality: "128K",
-    ffmpegLocation: ffmpegPath,
-    output: outputTemplate,
-    noPlaylist: true,
-    noWarnings: true,
-    noCallHome: true,
-    socketTimeout: Math.ceil(timeout / 1000),
-  }, { timeout });
+  try {
+    await ytDlpImpl(videoUrl, {
+      extractAudio: true,
+      audioFormat: "mp3",
+      audioQuality: "128K",
+      ffmpegLocation: ffmpegPath,
+      output: outputTemplate,
+      noPlaylist: true,
+      noWarnings: true,
+      socketTimeout: Math.ceil(timeout / 1000),
+    }, { timeout });
+  } catch (error) {
+    throw normalizeYouTubeError(error);
+  }
 
   const filePath = expectedFilePath;
   try {
@@ -89,4 +127,10 @@ async function removeDownloadedFile(filePath) {
   if (filePath) await fs.unlink(filePath).catch(() => {});
 }
 
-module.exports = { downloadYouTubeMp3, parseYouTubeUrl, removeDownloadedFile };
+module.exports = {
+  canonicalYouTubeUrl,
+  downloadYouTubeMp3,
+  normalizeYouTubeError,
+  parseYouTubeUrl,
+  removeDownloadedFile,
+};

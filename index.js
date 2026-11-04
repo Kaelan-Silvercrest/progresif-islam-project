@@ -37,16 +37,18 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
 } = require("@whiskeysockets/baileys");
+const fs = require("fs/promises");
 const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 
 const cfg = require("./config.js");
 const store = require("./store.js");
 const { matchModerationKeywords } = require("./moderation.js");
-const { classifyTargetedAbuse, generateChatResponse, getOllamaStatus } = require("./ollama.js");
+const { classifyTargetedAbuse, generateMathResponse, getOllamaStatus } = require("./ollama.js");
 const { generateProviderResponse } = require("./ai-providers.js");
 const { downloadYouTubeMp3, removeDownloadedFile } = require("./youtube.js");
 const { createSticker } = require("./sticker.js");
+const { renderMathSolution } = require("./math-image.js");
 
 const logger = pino({ level: "silent" }); // ganti ke "info" untuk debug baileys
 const botGeneratedMessageIds = new Set();
@@ -153,6 +155,23 @@ function installMessageGuard(sock) {
   };
 }
 
+async function sendMenu(sock, chatJid) {
+  let image;
+  try {
+    image = await fs.readFile(cfg.MENU_IMAGE_PATH);
+  } catch (error) {
+    console.error(`[MENU] Gagal membaca gambar ${cfg.MENU_IMAGE_PATH}: ${error?.message || error}`);
+    await sock.sendMessage(chatJid, { text: MENU_TEXT });
+    return;
+  }
+
+  await sock.sendMessage(chatJid, {
+    image,
+    caption: "🤖 *RONAN CALLOWAY BOT*",
+  });
+  await sock.sendMessage(chatJid, { text: MENU_TEXT });
+}
+
 function wasBotGeneratedMessage(message) {
   return Boolean(message?.key?.fromMe && botGeneratedMessageIds.delete(message.key.id));
 }
@@ -251,7 +270,7 @@ async function startBot() {
     }
 
     if (text.trim().toLowerCase() === ".menu") {
-      await sock.sendMessage(remoteJid, { text: MENU_TEXT });
+      await sendMenu(sock, remoteJid);
       return;
     }
 
@@ -275,13 +294,18 @@ async function startBot() {
       return;
     }
 
+    if (/^\.ai(?:\s|$)/i.test(text.trim())) {
+      await sock.sendMessage(remoteJid, { text: "Command .ai sudah diganti. Gunakan .mathai <soal matematika>." });
+      return;
+    }
+
     if (/^\.(groq|gemini|openrouter|cerebras)(?:\s|$)/i.test(text.trim())) {
       await handleProviderAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
       return;
     }
 
-    if (/^\.ai(?:\s|$)/i.test(text.trim())) {
-      await handleAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
+    if (/^\.mathai(?:\s|$)/i.test(text.trim())) {
+      await handleMathAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
       return;
     }
 
@@ -432,7 +456,7 @@ async function handleMp3Command(sock, chatJid, senderJid, text) {
   } catch (error) {
     console.error(`[MP3] Gagal memproses permintaan dari ${number}:`, error?.message || error);
     await sock.sendMessage(chatJid, {
-      text: `Download MP3 gagal: ${error?.message || "terjadi kesalahan"}. Pastikan link YouTube valid dan durasinya tidak melebihi batas.`,
+      text: `Download MP3 gagal: ${error?.message || "terjadi kesalahan saat memproses video."}`,
     });
   } finally {
     await removeDownloadedFile(downloaded?.filePath);
@@ -556,49 +580,63 @@ async function handleVerificationStatus(sock, chatJid, number) {
   });
 }
 
-async function handleAiChat(sock, chatJid, senderJid, text) {
-  const prompt = text.replace(/^\.ai\b/i, "").trim();
+async function handleMathAiChat(sock, chatJid, senderJid, text) {
+  const prompt = text.replace(/^\.mathai\b/i, "").trim();
   if (!prompt) {
-    await sock.sendMessage(chatJid, { text: "Format: .ai <pertanyaan>" });
+    await sock.sendMessage(chatJid, { text: "Format: .mathai <soal matematika>" });
     return;
   }
   if (!cfg.OLLAMA_CHAT_ENABLED) {
-    await sock.sendMessage(chatJid, { text: "Chat AI sedang dinonaktifkan." });
+    await sock.sendMessage(chatJid, { text: "Asisten matematika sedang dinonaktifkan." });
     return;
   }
-  if (prompt.length > cfg.OLLAMA_CHAT_MAX_PROMPT_CHARS) {
+  if (prompt.length > cfg.OLLAMA_MATHAI_MAX_PROMPT_CHARS) {
     await sock.sendMessage(chatJid, {
-      text: `Pertanyaan terlalu panjang. Maksimal ${cfg.OLLAMA_CHAT_MAX_PROMPT_CHARS} karakter.`,
+      text: `Soal terlalu panjang. Maksimal ${cfg.OLLAMA_MATHAI_MAX_PROMPT_CHARS} karakter.`,
     });
     return;
   }
   if (cfg.DRY_RUN) {
-    console.log(`[SIMULASI] Chat AI diminta di ${chatJid}; prompt tidak dikirim ke Ollama.`);
+    console.log(`[SIMULASI] .mathai diminta di ${chatJid}; soal tidak dikirim ke Ollama.`);
     return;
   }
   if (aiRequestInFlight) {
-    await sock.sendMessage(chatJid, { text: "AI sedang menjawab pesan lain; coba lagi sebentar." });
+    await sock.sendMessage(chatJid, { text: "AI sedang memproses soal lain; coba lagi sebentar." });
     return;
   }
 
   const number = numberFromJid(senderJid || chatJid);
-  const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, "ai");
-  const cooldownLeft = cfg.OLLAMA_CHAT_COOLDOWN_MS - (Date.now() - lastUsed);
+  const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, "mathai");
+  const cooldownLeft = cfg.OLLAMA_MATHAI_COOLDOWN_MS - (Date.now() - lastUsed);
   if (cooldownLeft > 0) {
     await sock.sendMessage(chatJid, {
-      text: `Chat AI bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
+      text: `Asisten matematika bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
     });
     return;
   }
 
-  store.markGroupMemberCommandUsed(chatJid, number, "ai", Date.now());
+  store.markGroupMemberCommandUsed(chatJid, number, "mathai", Date.now());
   aiRequestInFlight = true;
   try {
-    const answer = await generateChatResponse(prompt, cfg);
-    await sock.sendMessage(chatJid, { text: answer });
+    await sock.sendMessage(chatJid, { text: "Sedang menyelesaikan soal. Untuk soal sulit, proses bisa memerlukan beberapa menit..." });
+    const answer = await generateMathResponse(prompt, cfg);
+    const images = renderMathSolution(answer);
+    for (const [index, image] of images.entries()) {
+      await sock.sendMessage(chatJid, {
+        image,
+        mimetype: "image/png",
+        caption: images.length > 1 ? `Penyelesaian matematika (${index + 1}/${images.length})` : "Penyelesaian matematika",
+      });
+    }
   } catch (error) {
-    console.error(`[OLLAMA] Chat gagal (${error?.message || "error tidak diketahui"}).`);
-    await sock.sendMessage(chatJid, { text: "Chat AI lokal sedang tidak tersedia. Coba lagi nanti." });
+    console.error(`[MATHAI] Gagal memproses soal (${error?.message || "error tidak diketahui"}).`);
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError" ||
+      /timeout|aborted/i.test(error?.message || "");
+    await sock.sendMessage(chatJid, {
+      text: timedOut
+        ? "Ollama belum selesai menyelesaikan soal sebelum batas 5 menit. Coba pecah soal menjadi beberapa bagian atau sederhanakan prompt."
+        : `Asisten matematika gagal: ${String(error?.message || "kesalahan Ollama tidak diketahui").slice(0, 300)}`,
+    });
   } finally {
     aiRequestInFlight = false;
   }
@@ -673,7 +711,7 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
   }
 
   if (command === ".menu") {
-    await sock.sendMessage(groupJid, { text: MENU_TEXT });
+    await sendMenu(sock, groupJid);
     return;
   }
 
@@ -686,6 +724,11 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
     await sock.sendMessage(groupJid, {
       text: "Fitur kuis, diskusi, dan fakta sedang dinonaktifkan sementara.",
     });
+    return;
+  }
+
+  if (/^\.ai(?:\s|$)/i.test(text.trim())) {
+    await sock.sendMessage(groupJid, { text: "Command .ai sudah diganti. Gunakan .mathai <soal matematika>." });
     return;
   }
 
@@ -708,8 +751,8 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
     return;
   }
 
-  if (/^\.ai(?:\s|$)/i.test(text.trim())) {
-    await handleAiChat(sock, groupJid, senderJid, text.trim());
+  if (/^\.mathai(?:\s|$)/i.test(text.trim())) {
+    await handleMathAiChat(sock, groupJid, senderJid, text.trim());
     return;
   }
 
@@ -1874,7 +1917,7 @@ const MENU_TEXT =
   ".saran <isi saran>\n" +
   ".lapor @anggota [alasan]\n\n" +
   "🤖 *MENU AI*\n" +
-  ".ai <pertanyaan> (Ollama lokal)\n" +
+  ".mathai <soal> (DeepScaleR lokal via Ollama)\n" +
   ".groq <pertanyaan>\n" +
   ".gemini <pertanyaan>\n" +
   ".openrouter <pertanyaan>\n" +
@@ -1920,31 +1963,32 @@ async function handleOllamaCommand(sock, action, fetchImpl = globalThis.fetch) {
     return true;
   }
 
-  const status = await getOllamaStatus(cfg, fetchImpl);
+  const moderationModel = cfg.OLLAMA_MODERATION_MODEL || cfg.OLLAMA_MODEL;
+  const status = await getOllamaStatus(cfg, fetchImpl, moderationModel);
   const enabled = store.getOllamaModerationEnabled(cfg.OLLAMA_MODERATION_ENABLED);
   if (requestedAction === "on") {
     if (!status.available || !status.modelInstalled) {
       await sock.sendMessage(ownerJid, {
-        text: `Belum diaktifkan. Ollama ${status.available ? "tersambung tetapi model belum terpasang" : "tidak dapat dijangkau"}: ${cfg.OLLAMA_MODEL}.`,
+        text: `Belum diaktifkan. Ollama ${status.available ? "tersambung tetapi model belum terpasang" : "tidak dapat dijangkau"}: ${moderationModel}.`,
       });
       return true;
     }
     store.setOllamaModerationEnabled(true);
-    await sock.sendMessage(ownerJid, { text: `Moderasi AI aktif memakai ${cfg.OLLAMA_MODEL}.` });
+    await sock.sendMessage(ownerJid, { text: `Moderasi AI aktif memakai ${moderationModel}.` });
     return true;
   }
 
   if (requestedAction === "test") {
     if (!status.available || !status.modelInstalled) {
       await sock.sendMessage(ownerJid, {
-        text: `Uji gagal: Ollama/model ${cfg.OLLAMA_MODEL} tidak tersedia.`,
+        text: `Uji gagal: Ollama/model moderasi ${moderationModel} tidak tersedia.`,
       });
       return true;
     }
     try {
       const result = await classifyTargetedAbuse("LGBT goblok", cfg, fetchImpl);
       await sock.sendMessage(ownerJid, {
-        text: `Uji ${cfg.OLLAMA_MODEL}: ${result.targetedAbuse ? "terdeteksi" : "tidak terdeteksi"} (${result.category}, confidence ${result.confidence.toFixed(2)}).`,
+        text: `Uji ${moderationModel}: ${result.targetedAbuse ? "terdeteksi" : "tidak terdeteksi"} (${result.category}, confidence ${result.confidence.toFixed(2)}).`,
       });
     } catch (error) {
       await sock.sendMessage(ownerJid, { text: `Uji Ollama gagal: ${error?.message || "error tidak diketahui"}` });
@@ -1960,10 +2004,10 @@ async function handleOllamaCommand(sock, action, fetchImpl = globalThis.fetch) {
   await sock.sendMessage(ownerJid, {
     text:
       `Moderasi Ollama: ${enabled ? "aktif" : "nonaktif"}\n` +
-      `Model: ${cfg.OLLAMA_MODEL}\n` +
+      `Model moderasi: ${moderationModel} (${status.modelInstalled ? "terpasang" : "belum terpasang"})\n` +
+      `Model matematika: ${cfg.OLLAMA_MODEL} (${status.mathModelInstalled ? "terpasang" : "belum terpasang"})\n` +
       `Endpoint lokal: ${cfg.OLLAMA_BASE_URL}\n` +
-      `Service: ${status.available ? "tersambung" : "tidak tersambung"}\n` +
-      `Model terpasang: ${status.modelInstalled ? "ya" : "tidak"}`,
+      `Service: ${status.available ? "tersambung" : "tidak tersambung"}`,
   });
   return true;
 }
@@ -1974,7 +2018,7 @@ async function handleOwnerCommand(sock, text) {
   const arg = rest.join(" ").trim();
 
   if (cmd === ".menu") {
-    await sock.sendMessage(ownerTargetJid(), { text: MENU_TEXT });
+    await sendMenu(sock, ownerTargetJid());
     return true;
   }
 
@@ -2356,7 +2400,7 @@ module.exports = {
   handleGameAnswer,
   handleGroupMessage,
   handleGroupModerationCommand,
-  handleAiChat,
+  handleMathAiChat,
   handleProviderAiChat,
   handleMp3Command,
   handleStickerCommand,
@@ -2368,6 +2412,7 @@ module.exports = {
   handlePrivateGroupFeedback,
   extractWhatsAppInviteCode,
   installMessageGuard,
+  sendMenu,
   pollAllGroups,
   getModerationReason,
   privateSenderNumber,
