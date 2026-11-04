@@ -14,6 +14,8 @@
  * Cukup isi OWNER_NUMBER (sudah diisi). Sisanya opsional untuk diedit.
  */
 
+require("dotenv").config();
+
 module.exports = {
   // Nomor pemilik bot (satu-satunya yang boleh pakai .menu, .addgroup, dst).
   // Format internasional tanpa "+" / spasi / strip.
@@ -72,6 +74,18 @@ module.exports = {
   OLLAMA_CHAT_COOLDOWN_MS: 10 * 1000,
   OLLAMA_CHAT_MAX_PROMPT_CHARS: 1200,
   OLLAMA_CHAT_MAX_RESPONSE_CHARS: 1800,
+
+  AI_PROVIDER_TIMEOUT_MS: Number(process.env.AI_PROVIDER_TIMEOUT_MS) || 20 * 1000,
+  AI_PROVIDER_MAX_OUTPUT_TOKENS: Number(process.env.AI_PROVIDER_MAX_OUTPUT_TOKENS) || 384,
+  AI_PROVIDER_CHAT_ENABLED: process.env.AI_PROVIDER_CHAT_ENABLED !== "false",
+  GROQ_API_KEY: process.env.GROQ_API_KEY || "",
+  GROQ_MODEL: process.env.GROQ_MODEL || "qwen/qwen3.8-27b",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+  GEMINI_MODEL: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
+  OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+  CEREBRAS_API_KEY: process.env.CEREBRAS_API_KEY || "",
+  CEREBRAS_MODEL: process.env.CEREBRAS_MODEL || "llama-3.3-70b",
 
   AUTO_MODERATION_ENABLED: true,
   MAX_WARNINGS_BEFORE_KICK: 3,

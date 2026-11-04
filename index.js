@@ -44,12 +44,13 @@ const cfg = require("./config.js");
 const store = require("./store.js");
 const { matchModerationKeywords } = require("./moderation.js");
 const { classifyTargetedAbuse, generateChatResponse, getOllamaStatus } = require("./ollama.js");
+const { generateProviderResponse } = require("./ai-providers.js");
 const { downloadYouTubeMp3, removeDownloadedFile } = require("./youtube.js");
 const { createSticker } = require("./sticker.js");
 
 const logger = pino({ level: "silent" }); // ganti ke "info" untuk debug baileys
 const botGeneratedMessageIds = new Set();
-let ollamaRequestInFlight = false;
+let aiRequestInFlight = false;
 let lastOllamaFailureLogAt = 0;
 let mp3DownloadInFlight = false;
 let broadcastInFlight = false;
@@ -274,6 +275,11 @@ async function startBot() {
       return;
     }
 
+    if (/^\.(groq|gemini|openrouter|cerebras)(?:\s|$)/i.test(text.trim())) {
+      await handleProviderAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
+      return;
+    }
+
     if (/^\.ai(?:\s|$)/i.test(text.trim())) {
       await handleAiChat(sock, remoteJid, jidFromNumber(senderNumber), text.trim());
       return;
@@ -361,9 +367,9 @@ async function getModerationReason(text, fetchImpl = globalThis.fetch) {
 
   const localScore = Number(localReason?.match(/skor (\d+)/i)?.[1] || 0);
   if (localScore >= cfg.OLLAMA_RULE_OVERRIDE_SCORE) return localReason;
-  if (ollamaRequestInFlight) return localReason;
+  if (aiRequestInFlight) return localReason;
 
-  ollamaRequestInFlight = true;
+  aiRequestInFlight = true;
   try {
     const decision = await classifyTargetedAbuse(text, cfg, fetchImpl);
     if (decision.confidence < cfg.OLLAMA_MODERATION_CONFIDENCE_THRESHOLD) return localReason;
@@ -376,7 +382,7 @@ async function getModerationReason(text, fetchImpl = globalThis.fetch) {
     }
     return localReason;
   } finally {
-    ollamaRequestInFlight = false;
+    aiRequestInFlight = false;
   }
 }
 
@@ -570,7 +576,7 @@ async function handleAiChat(sock, chatJid, senderJid, text) {
     console.log(`[SIMULASI] Chat AI diminta di ${chatJid}; prompt tidak dikirim ke Ollama.`);
     return;
   }
-  if (ollamaRequestInFlight) {
+  if (aiRequestInFlight) {
     await sock.sendMessage(chatJid, { text: "AI sedang menjawab pesan lain; coba lagi sebentar." });
     return;
   }
@@ -586,7 +592,7 @@ async function handleAiChat(sock, chatJid, senderJid, text) {
   }
 
   store.markGroupMemberCommandUsed(chatJid, number, "ai", Date.now());
-  ollamaRequestInFlight = true;
+  aiRequestInFlight = true;
   try {
     const answer = await generateChatResponse(prompt, cfg);
     await sock.sendMessage(chatJid, { text: answer });
@@ -594,8 +600,66 @@ async function handleAiChat(sock, chatJid, senderJid, text) {
     console.error(`[OLLAMA] Chat gagal (${error?.message || "error tidak diketahui"}).`);
     await sock.sendMessage(chatJid, { text: "Chat AI lokal sedang tidak tersedia. Coba lagi nanti." });
   } finally {
-    ollamaRequestInFlight = false;
+    aiRequestInFlight = false;
   }
+}
+
+async function handleProviderAiChat(sock, chatJid, senderJid, text) {
+  const match = text.match(/^\.(groq|gemini|openrouter|cerebras)(?:\s+([\s\S]*))?$/i);
+  if (!match) return false;
+  const provider = match[1].toLowerCase();
+  const prompt = (match[2] || "").trim();
+  if (!prompt) {
+    await sock.sendMessage(chatJid, { text: `Format: .${provider} <pertanyaan>` });
+    return true;
+  }
+  if (!cfg.AI_PROVIDER_CHAT_ENABLED) {
+    await sock.sendMessage(chatJid, { text: "Chat AI sedang dinonaktifkan." });
+    return true;
+  }
+  if (prompt.length > cfg.OLLAMA_CHAT_MAX_PROMPT_CHARS) {
+    await sock.sendMessage(chatJid, {
+      text: `Pertanyaan terlalu panjang. Maksimal ${cfg.OLLAMA_CHAT_MAX_PROMPT_CHARS} karakter.`,
+    });
+    return true;
+  }
+  if (cfg.DRY_RUN) {
+    console.log(`[SIMULASI] Chat ${provider} diminta di ${chatJid}; prompt tidak dikirim ke provider.`);
+    return true;
+  }
+  if (aiRequestInFlight) {
+    await sock.sendMessage(chatJid, { text: "AI sedang menjawab pesan lain; coba lagi sebentar." });
+    return true;
+  }
+
+  const number = numberFromJid(senderJid || chatJid);
+  const cooldownKey = `ai-${provider}`;
+  const lastUsed = store.getGroupMemberCommandLastUsedAt(chatJid, number, cooldownKey);
+  const cooldownLeft = cfg.OLLAMA_CHAT_COOLDOWN_MS - (Date.now() - lastUsed);
+  if (cooldownLeft > 0) {
+    await sock.sendMessage(chatJid, {
+      text: `AI ${provider} bisa digunakan lagi sekitar ${Math.ceil(cooldownLeft / 1000)} detik lagi.`,
+    });
+    return true;
+  }
+
+  store.markGroupMemberCommandUsed(chatJid, number, cooldownKey, Date.now());
+  aiRequestInFlight = true;
+  try {
+    const answer = await generateProviderResponse(provider, prompt, cfg);
+    await sock.sendMessage(chatJid, { text: answer });
+  } catch (error) {
+    console.error(`[AI ${provider.toUpperCase()}] Permintaan gagal: ${error?.message || "error tidak diketahui"}`);
+    const missingKey = error?.message === "API key belum diatur pada environment.";
+    await sock.sendMessage(chatJid, {
+      text: missingKey
+        ? `API key ${provider} belum diatur. Isi ${provider.toUpperCase()}_API_KEY di file .env lalu mulai ulang bot.`
+        : `AI ${provider} gagal: ${String(error?.message || "provider tidak tersedia").slice(0, 300)}`,
+    });
+  } finally {
+    aiRequestInFlight = false;
+  }
+  return true;
 }
 
 async function handleGroupMessage(sock, groupJid, senderJid, text, message, senderIsOwner) {
@@ -646,6 +710,11 @@ async function handleGroupMessage(sock, groupJid, senderJid, text, message, send
 
   if (/^\.ai(?:\s|$)/i.test(text.trim())) {
     await handleAiChat(sock, groupJid, senderJid, text.trim());
+    return;
+  }
+
+  if (/^\.(groq|gemini|openrouter|cerebras)(?:\s|$)/i.test(text.trim())) {
+    await handleProviderAiChat(sock, groupJid, senderJid, text.trim());
     return;
   }
 
@@ -1802,9 +1871,14 @@ const MENU_TEXT =
   ".sticker (kirim/balas gambar atau GIF)\n" +
   ".translate <kode-bahasa> <teks>\n" +
   ".verifstatus (DM bot)\n" +
-  ".ai <pertanyaan>\n" +
   ".saran <isi saran>\n" +
   ".lapor @anggota [alasan]\n\n" +
+  "🤖 *MENU AI*\n" +
+  ".ai <pertanyaan> (Ollama lokal)\n" +
+  ".groq <pertanyaan>\n" +
+  ".gemini <pertanyaan>\n" +
+  ".openrouter <pertanyaan>\n" +
+  ".cerebras <pertanyaan>\n\n" +
   "🔐 *VERIFIKASI — KHUSUS OWNER (lewat DM bot)*\n" +
   ".pending\n" +
   ".approve <id>\n" +
@@ -2283,6 +2357,7 @@ module.exports = {
   handleGroupMessage,
   handleGroupModerationCommand,
   handleAiChat,
+  handleProviderAiChat,
   handleMp3Command,
   handleStickerCommand,
   handleTranslateCommand,

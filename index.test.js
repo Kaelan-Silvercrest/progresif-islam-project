@@ -4,6 +4,7 @@ const cfg = require("./config.js");
 const store = require("./store.js");
 const {
   handleOwnerCommand,
+  handleProviderAiChat,
   handleTranslateCommand,
   handleVerificationStatus,
 } = require("./index.js");
@@ -87,4 +88,28 @@ test("verification status only returns the sender's saved status", async (t) => 
 
   assert.match(messages[0].text, /Grup uji/);
   assert.match(messages[0].text, /diterima/);
+});
+
+test("provider AI commands explain how to configure a missing key", async (t) => {
+  const originalDryRun = cfg.DRY_RUN;
+  const originalApiKey = cfg.GROQ_API_KEY;
+  const originalGetCooldown = store.getGroupMemberCommandLastUsedAt;
+  const originalMarkCooldown = store.markGroupMemberCommandUsed;
+  t.after(() => {
+    cfg.DRY_RUN = originalDryRun;
+    cfg.GROQ_API_KEY = originalApiKey;
+    store.getGroupMemberCommandLastUsedAt = originalGetCooldown;
+    store.markGroupMemberCommandUsed = originalMarkCooldown;
+  });
+  cfg.DRY_RUN = false;
+  cfg.GROQ_API_KEY = "";
+  store.getGroupMemberCommandLastUsedAt = () => 0;
+  store.markGroupMemberCommandUsed = () => {};
+
+  const messages = [];
+  await handleProviderAiChat({
+    sendMessage: async (jid, content) => messages.push({ jid, ...content }),
+  }, "user@s.whatsapp.net", "user@s.whatsapp.net", ".groq Halo");
+
+  assert.match(messages[0].text, /GROQ_API_KEY/);
 });

@@ -18,6 +18,7 @@ berjalan dengan Node.js. Bot tidak memerlukan Chromium atau Puppeteer.
 - Menyediakan jajak pendapat, pencarian metadata artikel jurnal, saran, laporan, dan moderasi otomatis.
 - Menyediakan moderasi berbasis aturan lokal serta moderasi AI melalui Ollama.
 - Menyediakan downloader audio MP3 publik melalui command `.mp3 <link YouTube>` dengan batas durasi, ukuran, dan cooldown.
+- Menyediakan chatbot Ollama lokal serta provider cloud melalui Groq, Gemini, OpenRouter, dan Cerebras.
 - Menyediakan broadcast owner ke semua grup terdaftar, pemeriksaan status verifikasi, pembuatan sticker dari gambar/GIF, dan terjemahan teks.
 
 ## Persyaratan
@@ -43,6 +44,13 @@ autentikasi akan tersimpan secara lokal.
 
 Atur nomor pemilik bot pada `OWNER_NUMBER` di `config.js`. Gunakan format
 internasional tanpa tanda tambah, spasi, atau tanda hubung.
+
+Untuk menggunakan provider AI, salin `.env.example` menjadi `.env` di mesin
+tempat bot berjalan, lalu isi API key provider di `.env`. File `.env` sudah
+diabaikan Git; jangan pernah memasukkan API key ke source code atau commit.
+Pada hosting, simpan key sebagai environment variables/secrets di pengaturan
+hosting. Perubahan kode dapat di-push dan di-deploy tanpa mengirim atau
+memasukkan ulang key.
 
 ## Menyiapkan Grup
 
@@ -126,6 +134,10 @@ perintah khusus pemilik.
 | `.profil` | Menampilkan skor dan peringkat pengguna. |
 | `.jurnal <topik>` | Mencari metadata artikel jurnal melalui Crossref. |
 | `.ai <pertanyaan>` | Mengirim pertanyaan kepada chatbot lokal berbasis Ollama. |
+| `.groq <pertanyaan>` | Mengirim pertanyaan ke Groq. Memerlukan `GROQ_API_KEY` di `.env`. |
+| `.gemini <pertanyaan>` | Mengirim pertanyaan ke Gemini. Memerlukan `GEMINI_API_KEY` di `.env`. |
+| `.openrouter <pertanyaan>` | Mengirim pertanyaan ke OpenRouter. Memerlukan `OPENROUTER_API_KEY` di `.env`. |
+| `.cerebras <pertanyaan>` | Mengirim pertanyaan ke Cerebras. Memerlukan `CEREBRAS_API_KEY` di `.env`. |
 | `.mp3 <link YouTube>` | Mengunduh audio dari video YouTube dan mengirimkannya sebagai MP3. Dapat digunakan semua pengguna di DM atau grup terdaftar. |
 | `.sticker` | Mengubah gambar atau GIF menjadi sticker. Kirim gambar/GIF dengan caption `.sticker`, atau balas gambar/GIF dengan command ini. |
 | `.translate <kode-bahasa> <teks>` | Menerjemahkan teks, misalnya `.translate en Selamat pagi`. Tersedia di DM atau grup terdaftar. |
@@ -175,6 +187,20 @@ yang menggunakannya lewat DM bot, termasuk menunggu dimulai, sedang berlangsung,
 menunggu keputusan owner, diterima, ditolak, kedaluwarsa, atau dibatalkan.
 Riwayat menyimpan status dan nama grup terakhir per grup, bukan jawaban
 verifikasi.
+
+### Provider AI
+
+Perintah `.ai` tetap menggunakan Ollama lokal. Alternatif provider cloud tersedia
+melalui `.groq`, `.gemini`, `.openrouter`, dan `.cerebras`, masing-masing diikuti
+pertanyaan. Model tiap provider dapat diubah lewat variabel `*_MODEL` di `.env`.
+Prompt yang dikirim ke provider cloud akan diproses oleh layanan provider
+tersebut; jangan kirim data sensitif.
+
+Untuk menyiapkan key di komputer lokal, salin `.env.example` sebagai `.env`,
+lalu isi key yang baru dibuat. Jangan bagikan atau commit file `.env`. Jika key
+pernah terpublikasi, cabut key tersebut di dashboard provider dan gunakan key
+baru. Di server hosting, masukkan key pada pengaturan environment variables atau
+secrets agar tetap tersimpan saat kode diperbarui.
 
 ### Moderasi Grup
 
