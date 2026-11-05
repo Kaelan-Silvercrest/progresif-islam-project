@@ -57,12 +57,18 @@ const PROVIDERS = {
 function providerConfig(provider, config) {
   const definition = PROVIDERS[provider];
   if (!definition) throw new Error(`Provider AI tidak dikenal: ${provider}`);
+  const configuredEndpoint = definition.endpointField
+    ? String(config[definition.endpointField] || "").replace(/\/+$/, "")
+    : definition.endpoint;
   return {
     ...definition,
+    endpoint: definition.endpointField && configuredEndpoint
+      ? `${configuredEndpoint}/chat/completions`
+      : configuredEndpoint,
     apiKey: config[definition.keyField],
     model: config[definition.modelField],
     timeoutMs: config[definition.timeoutField] || config.AI_PROVIDER_TIMEOUT_MS,
-    maxPromptChars: config.OLLAMA_CHAT_MAX_PROMPT_CHARS,
+    maxPromptChars: config[definition.promptCharsField] || config.OLLAMA_CHAT_MAX_PROMPT_CHARS,
     maxResponseChars: config[definition.responseCharsField] || config.OLLAMA_CHAT_MAX_RESPONSE_CHARS,
     maxOutputTokens: config[definition.outputTokensField] || config.AI_PROVIDER_MAX_OUTPUT_TOKENS,
   };

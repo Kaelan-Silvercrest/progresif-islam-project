@@ -387,12 +387,6 @@ function isConfiguredOwnerJid(...jids) {
 
 async function getModerationReason(text, fetchImpl = globalThis.fetch) {
   const localReason = matchModerationKeywords(text, cfg);
-  const candidate = localReason || matchModerationKeywords(text, {
-    ...cfg,
-    MODERATION_MATCH_THRESHOLD: 1,
-  });
-  if (!candidate) return null;
-
   if (!store.getOllamaModerationEnabled(cfg.OLLAMA_MODERATION_ENABLED)) return localReason;
 
   const localScore = Number(localReason?.match(/skor (\d+)/i)?.[1] || 0);
@@ -403,7 +397,7 @@ async function getModerationReason(text, fetchImpl = globalThis.fetch) {
   try {
     const decision = await classifyTargetedAbuse(text, cfg, fetchImpl);
     if (decision.confidence < cfg.OLLAMA_MODERATION_CONFIDENCE_THRESHOLD) return localReason;
-    if (!decision.targetedAbuse) return null;
+    if (!decision.violation) return null;
     return `AI moderation: ${decision.category} (confidence ${decision.confidence.toFixed(2)})`;
   } catch (error) {
     if (Date.now() - lastOllamaFailureLogAt >= 60_000) {
@@ -638,6 +632,7 @@ async function handleMathAiChat(sock, chatJid, senderJid, text) {
     console.error(`[MATHAI] Gagal memproses soal (${error?.message || "error tidak diketahui"}).`);
     const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError" ||
       /timeout|aborted/i.test(error?.message || "");
+    const missingApiKey = error?.message === "API key belum diatur pada environment.";
     await sock.sendMessage(chatJid, {
       text: timedOut
         ? "Ollama belum selesai menyelesaikan soal sebelum batas 5 menit. Coba pecah soal menjadi beberapa bagian atau sederhanakan prompt."
@@ -2075,9 +2070,9 @@ async function handleOllamaCommand(sock, action, fetchImpl = globalThis.fetch) {
       return true;
     }
     try {
-      const result = await classifyTargetedAbuse("LGBT goblok", cfg, fetchImpl);
+      const result = await classifyTargetedAbuse("Ancaman dan hinaan rasis terhadap anggota", cfg, fetchImpl);
       await sock.sendMessage(ownerJid, {
-        text: `Uji ${moderationModel}: ${result.targetedAbuse ? "terdeteksi" : "tidak terdeteksi"} (${result.category}, confidence ${result.confidence.toFixed(2)}).`,
+        text: `Uji ${moderationModel}: ${result.violation ? "terdeteksi" : "tidak terdeteksi"} (${result.category}, confidence ${result.confidence.toFixed(2)}).`,
       });
     } catch (error) {
       await sock.sendMessage(ownerJid, { text: `Uji Ollama gagal: ${error?.message || "error tidak diketahui"}` });

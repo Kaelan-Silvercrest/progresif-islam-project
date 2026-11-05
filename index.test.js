@@ -14,6 +14,7 @@ const {
   sendMenu,
   handleTranslateCommand,
   handleVerificationStatus,
+  getModerationReason,
 } = require("./index.js");
 const { renderMathSolution } = require("./math-image.js");
 
@@ -49,6 +50,25 @@ test("math solution is rendered as one or more PNG pages", () => {
     assert.equal(image.toString("hex", 0, 8), "89504e470d0a1a0a");
     assert.equal(image.readUInt32BE(16), 1080);
     assert.equal(image.readUInt32BE(20), 1800);
+  }
+});
+
+test("large aligned math solutions rasterize separately and render as PNG pages", () => {
+  const terms = Array.from(
+    { length: 60 },
+    (_, index) => `\\frac{a_{${index + 1}}\\,x_{${index + 1}}^2}{1+\\phi_{${index + 1}}}`
+  ).join(" + ");
+  const solution = [
+    "## Analisis kestabilan",
+    "Dengan fungsi penghalang dan suku kopling:",
+    `\\[\\begin{aligned} \\dot V_N &= -\\lambda V_N + ${terms} \\\\ &\\le -\\lambda V_N + \\sum_{i=1}^{N}\\sum_{j=1}^{N} a_{ij}(x_i-x_j)^2 \\end{aligned}\\]`,
+    "Jawaban akhir: untuk N terbatas, kontribusi kopling perlu dibatasi.",
+  ].join("\n");
+
+  const pages = renderMathSolution(solution);
+  assert.ok(pages.length >= 1);
+  for (const image of pages) {
+    assert.equal(image.toString("hex", 0, 8), "89504e470d0a1a0a");
   }
 });
 
@@ -229,6 +249,40 @@ test("verification status only returns the sender's saved status", async (t) => 
 
   assert.match(messages[0].text, /Grup uji/);
   assert.match(messages[0].text, /diterima/);
+});
+
+test("AI moderation checks messages without local keyword matches", async (t) => {
+  const originalEnabled = cfg.OLLAMA_MODERATION_ENABLED;
+  const originalThreshold = cfg.OLLAMA_MODERATION_CONFIDENCE_THRESHOLD;
+  const originalOverrideScore = cfg.OLLAMA_RULE_OVERRIDE_SCORE;
+  const originalGetEnabled = store.getOllamaModerationEnabled;
+  t.after(() => {
+    cfg.OLLAMA_MODERATION_ENABLED = originalEnabled;
+    cfg.OLLAMA_MODERATION_CONFIDENCE_THRESHOLD = originalThreshold;
+    cfg.OLLAMA_RULE_OVERRIDE_SCORE = originalOverrideScore;
+    store.getOllamaModerationEnabled = originalGetEnabled;
+  });
+  cfg.OLLAMA_MODERATION_ENABLED = true;
+  cfg.OLLAMA_MODERATION_CONFIDENCE_THRESHOLD = 0.8;
+  cfg.OLLAMA_RULE_OVERRIDE_SCORE = 99;
+  store.getOllamaModerationEnabled = () => true;
+  let requestUrl;
+  let requestBody;
+  const reason = await getModerationReason(
+    "Saya akan membawa senjata ke sekolah besok.",
+    async (url, options) => {
+      requestUrl = url;
+      requestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ message: { content: "UNSAFE\nS1" } }),
+      };
+    }
+  );
+
+  assert.equal(requestUrl, `${cfg.OLLAMA_BASE_URL}/api/chat`);
+  assert.equal(requestBody.model, "llama-guard3:1b");
+  assert.match(reason, /AI moderation: s1/);
 });
 
 test(".mathai uses the local math model and returns the solution", async (t) => {

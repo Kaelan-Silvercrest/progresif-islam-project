@@ -124,11 +124,18 @@ function renderFormula(formula) {
     .replaceAll("currentColor", "#17212b");
   const viewBox = svg.match(/viewBox="([^"]+)"/)?.[1];
   if (!viewBox) throw new Error("Dimensi rumus hasil render tidak valid.");
-  const [, , width, height] = viewBox.split(/\s+/).map(Number);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+  const [viewBoxX, viewBoxY, width, height] = viewBox.split(/\s+/).map(Number);
+  if (
+    !Number.isFinite(viewBoxX) ||
+    !Number.isFinite(viewBoxY) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
     throw new Error("Dimensi rumus hasil render tidak valid.");
   }
-  return { svg, viewBox, width, height };
+  return { svg, width, height };
 }
 
 function layoutItems(items) {
@@ -143,11 +150,15 @@ function layoutItems(items) {
     if (block.type === "math") {
       const rendered = renderFormula(block.formula);
       const scale = Math.min(0.04, maxFormulaWidth / rendered.width, maxContentHeight / rendered.height);
+      const width = Math.max(1, Math.ceil(rendered.width * scale));
+      const formulaImage = new Resvg(rendered.svg, {
+        fitTo: { mode: "width", value: width },
+      }).render().asPng();
       block = {
         ...block,
-        ...rendered,
-        width: rendered.width * scale,
-        height: rendered.height * scale + 18,
+        imageData: formulaImage.toString("base64"),
+        width: formulaImage.readUInt32BE(16),
+        height: formulaImage.readUInt32BE(20) + 18,
       };
     } else if (block.type === "text") {
       block.height = block.style === "heading" || block.style === "answer" ? 52 : BODY_LINE_HEIGHT;
@@ -184,7 +195,7 @@ function pageSvg(blocks, pageIndex, pageCount) {
       );
     } else if (block.type === "math") {
       content.push(
-        `<svg x="${MARGIN}" y="${y}" width="${block.width}" height="${block.height - 18}" viewBox="${block.viewBox}" xmlns="http://www.w3.org/2000/svg">${block.svg.replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg>`
+        `<image x="${MARGIN}" y="${y}" width="${block.width}" height="${block.height - 18}" href="data:image/png;base64,${block.imageData}"/>`
       );
     }
     y += block.height;

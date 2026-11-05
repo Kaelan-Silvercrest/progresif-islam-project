@@ -28,7 +28,8 @@ berjalan dengan Node.js. Bot tidak memerlukan Chromium atau Puppeteer.
 - npm.
 - Akun WhatsApp untuk menjalankan bot.
 - Hak administrator bot pada setiap grup yang dipantau.
-- Ollama dan model `deepscaler` untuk menggunakan asisten matematika `.mathai`. Model `qwen2.5:3b` tetap digunakan terpisah untuk penilaian moderasi AI jika diaktifkan.
+- Ollama dan model `deepscaler` untuk `.mathai`; model `llama-guard3:1b`
+  digunakan untuk moderasi AI.
 
 ## Instalasi dan Menjalankan Bot
 
@@ -52,10 +53,10 @@ Unduh model matematika DeepScaleR yang digunakan `.mathai` dengan:
 ollama pull deepscaler
 ```
 
-Jika moderasi AI Ollama juga ingin digunakan, unduh model moderasinya:
+Unduh model Llama Guard yang digunakan untuk moderasi AI:
 
 ```bash
-ollama pull qwen2.5:3b
+ollama pull llama-guard3:1b
 ```
 
 Untuk menggunakan provider AI cloud, buat file `.env` di folder proyek dan
@@ -245,9 +246,19 @@ ini mendukung konteks panjang, tetapi batas teks perintah di bot adalah 12.000 k
 Ollama diberi waktu maksimum lima menit untuk menghasilkan hingga 4.096 token;
 RAM/kecepatan inferensi bergantung pada perangkat yang menjalankan Ollama.
 
-Moderasi AI tetap menggunakan model terpisah `qwen2.5:3b`, agar penggantian
-model matematika tidak mengubah classifier moderasi. Jika moderasi AI Ollama
-diaktifkan, unduh juga dengan `ollama pull qwen2.5:3b`.
+Moderasi AI memakai model terpisah `llama-guard3:1b` melalui endpoint Ollama
+lokal yang sama. Saat aktif, AI dapat memeriksa pesan grup terdaftar meskipun
+pesan tersebut tidak cocok dengan kata kunci lokal. Kebijakan mencakup
+ancaman/kekerasan, aktivitas berbahaya atau kriminal, ujaran kebencian dan
+rasisme, pelecehan/penghinaan/kata kasar yang menyerang, eksploitasi seksual,
+dorongan menyakiti diri, doxxing, serta penipuan atau spam berbahaya. Diskusi
+netral, edukasi, dukungan, dan kutipan yang mengecam pelanggaran tidak
+seharusnya ditandai. Kata kasar dinilai berdasarkan konteks, bukan daftar kata
+semata. Jika Ollama tidak tersedia atau jawaban model tidak valid, moderasi
+berbasis aturan lokal tetap menjadi fallback. Status model dan pengujian dapat
+diperiksa lewat `.ollama status` dan `.ollama test`. Ketika inferensi sedang
+berlangsung atau pesan mendapat skor aturan lokal yang tinggi, bot memakai
+hasil aturan lokal langsung agar pesan tidak menunggu inferensi tambahan.
 
 Alternatif provider cloud tersedia melalui `.groq`, `.gemini`, `.openrouter`,
 `.soshumai`, dan `.cerebras`, masing-masing diikuti pertanyaan. `.openrouter`
@@ -347,7 +358,7 @@ Pengaturan bot berada di `config.js`. Nilai yang umum disesuaikan meliputi:
 | `VERIFICATION_NUMBER_COOLDOWN_MS` | Jeda verifikasi ulang untuk nomor yang sama. Nilai bawaan 10 menit. |
 | `OLLAMA_BASE_URL` | Alamat layanan Ollama. Nilai bawaan `http://127.0.0.1:11434`. |
 | `OLLAMA_MODEL` | Model asisten matematika `.mathai`. Nilai bawaan `deepscaler`. |
-| `OLLAMA_MODERATION_MODEL` | Model classifier moderasi Ollama. Nilai bawaan `qwen2.5:3b`. |
+| `OLLAMA_MODERATION_MODEL` | Model classifier moderasi Ollama. Nilai bawaan `llama-guard3:1b`. |
 | `OLLAMA_MODERATION_ENABLED` | Mengaktifkan penilaian moderasi melalui Ollama. |
 | `AUTO_MODERATION_ENABLED` | Mengaktifkan moderasi otomatis berbasis aturan lokal. |
 | `MAX_WARNINGS_BEFORE_KICK` | Jumlah peringatan sebelum bot mencoba mengeluarkan anggota. Nilai bawaan tiga. |
@@ -416,9 +427,9 @@ karena pembatasan wilayah, login, atau perubahan layanan YouTube.
 **Ollama tidak tersedia**
 
 Pastikan layanan Ollama berjalan, alamat `OLLAMA_BASE_URL` benar, dan model
-`deepscaler` tersedia untuk `.mathai`. Jika menggunakan moderasi AI, pastikan
-model `qwen2.5:3b` juga sudah diunduh. Moderasi berbasis aturan lokal tetap
-berjalan saat penilaian AI tidak dapat digunakan.
+`deepscaler` tersedia untuk `.mathai` dan `llama-guard3:1b` tersedia untuk
+moderasi AI. Moderasi berbasis aturan lokal tetap berjalan saat Ollama tidak
+dapat dijangkau atau penilaian AI gagal.
 
 **Fungsi Baileys tidak ditemukan**
 
